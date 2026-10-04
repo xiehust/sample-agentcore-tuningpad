@@ -1,0 +1,35 @@
+id: officebench
+name: {en: "OfficeBench (office automation)", zh-CN: "OfficeBench（办公自动化）"}
+description:
+  en: "300 calendar / email / Excel / Word / PDF / OCR tasks with 20 tools; reward from the task's evaluation spec. Training recipe verified with Megatron LoRA on Qwen3.6-27B (8×H100)."
+  zh-CN: "300 个日历、邮件、Excel、Word、PDF、OCR 任务，20 个工具；按任务的评测配置打分。训练配方已在 Qwen3.6-27B（8×H100）Megatron LoRA 上验证。"
+contract: verl
+verified: true
+toolkit_dir: examples/strands_officebench_agent
+toolkit_files: [rl_app.py, reward.py, models.py, utils.py, tools.py]
+params: []
+payload:
+  prompt_field: null           # payload carries S3 URIs; the dataset has an explicit prompt column
+  required: [task_uri]
+  explicit_prompt_column: true
+dataset: {builtin: officebench}
+agent_loop:
+  max_tokens_per_turn: 8192
+  max_rollout_time: 1800
+  tps_limit: 8
+  history_mode: linear
+  linear_on_nonlinear: reset
+smoke_payloads: []             # filled from the generated dataset (first two val rows)
+presets:
+  - id: qwen36-27b-megatron
+    label: {en: "Qwen3.6-27B · 8×H100 · Megatron LoRA r64 (verified)", zh-CN: "Qwen3.6-27B · 8×H100 · Megatron LoRA r64（已验证）"}
+    model_id: Qwen/Qwen3.6-27B
+    instance_type: p5.48xlarge
+    nodes: 1
+    params: {train_batch_size: 16, rollout_n: 16, lr: 1.0e-5, total_epochs: 4, max_model_len: 131072, max_prompt_length: 8192, max_response_length: 131072, kl_loss_coef: 0.001, save_freq: 15, test_freq: 5, gpu_memory_utilization: 0.7, val_n: 4, val_temperature: 0.7, enable_thinking: false}
+  - id: qwen35-4b-fsdp-lora
+    label: {en: "Qwen3.5-4B · 8×H100 · FSDP LoRA, 32k (not verified)", zh-CN: "Qwen3.5-4B · 8×H100 · FSDP LoRA，32k（未验证）"}
+    model_id: Qwen/Qwen3.5-4B
+    instance_type: p5.48xlarge
+    nodes: 1
+    params: {train_batch_size: 16, rollout_n: 8, lr: 2.0e-5, total_epochs: 2, max_model_len: 32768, max_prompt_length: 8192, max_response_length: 32768, kl_loss_coef: 0.001, save_freq: 15, test_freq: 5, gpu_memory_utilization: 0.5, enable_thinking: false}

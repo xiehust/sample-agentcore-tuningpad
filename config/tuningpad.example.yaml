@@ -1,0 +1,6 @@
+# Copy to config/tuningpad.yaml (gitignored). Every key can also be set as TUNINGPAD_<KEY>.
+default_region: us-east-1        # HyperPod GPU "for cluster usage" quota lives here in this account
+# password: ""                   # set to enable login (required when binding a non-loopback host)
+# host: 127.0.0.1
+# toolkit_path: ../agentcore-rl-toolkit
+# resource_tag: tuningpad        # Project tag value on every resource TuningPad creates

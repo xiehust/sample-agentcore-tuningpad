@@ -1,0 +1,14 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+# local state
+/.run/
+/data/
+/config/tuningpad.yaml

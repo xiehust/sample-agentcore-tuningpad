@@ -1,0 +1,56 @@
+id: gsm8k_math
+name: {en: "GSM8K Math (calculator agent)", zh-CN: "GSM8K 数学（计算器 Agent）"}
+description:
+  en: "Strands agent with a calculator tool solving grade-school math. Reward 1 when the final '#### <answer>' matches. Verified end to end on AgentCore with Qwen3.5-2B."
+  zh-CN: "带计算器工具的 Strands Agent 解小学数学题，最终 '#### <答案>' 正确记 1 分。已在 AgentCore 上用 Qwen3.5-2B 端到端验证。"
+contract: verl
+verified: true
+# files copied from the toolkit checkout, then overlaid with ./agent
+toolkit_dir: examples/strands_math_agent
+toolkit_files: [reward.py, models.py]
+params:
+  - key: system_prompt
+    type: text
+    label: {en: "System prompt", zh-CN: "系统提示词"}
+    default: "Your task is to solve the math problem. Use the calculator tool to compute all mathematical expressions. Let's think step by step and output the final answer after \"####\"."
+  - key: reward_method
+    type: select
+    label: {en: "Answer matching", zh-CN: "答案匹配方式"}
+    options: [strict, flexible]
+    default: strict
+  - key: format_score
+    type: number
+    label: {en: "Score for a well-formed wrong answer", zh-CN: "格式正确但答案错误的得分"}
+    default: 0.0
+    min: 0
+    max: 1
+payload:
+  prompt_field: prompt
+  required: [prompt, answer]
+dataset: {builtin: gsm8k}
+agent_loop:
+  max_tokens_per_turn: 1024
+  max_rollout_time: 180
+  tps_limit: 8
+smoke_payloads:
+  - {prompt: "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?", answer: "72"}
+  - {prompt: "Weng earns $12 an hour for babysitting. Yesterday, she just did 50 minutes of babysitting. How much did she earn?", answer: "10"}
+presets:
+  - id: qwen35-2b-1gpu
+    label: {en: "Qwen3.5-2B · 1×H100 · FSDP full (verified)", zh-CN: "Qwen3.5-2B · 1×H100 · FSDP 全参（已验证）"}
+    model_id: Qwen/Qwen3.5-2B
+    instance_type: p5.4xlarge
+    nodes: 1
+    params: {train_batch_size: 32, rollout_n: 8, lr: 5.0e-6, total_training_steps: 60, max_model_len: 4096, max_prompt_length: 2048, max_response_length: 4096, kl_loss_coef: 0.001, save_freq: 10, test_freq: 10, gpu_memory_utilization: 0.4}
+  - id: qwen35-2b-8gpu
+    label: {en: "Qwen3.5-2B · 8×H100 · FSDP full (verified, ~101 s/step)", zh-CN: "Qwen3.5-2B · 8×H100 · FSDP 全参（已验证，约 101 秒/步）"}
+    model_id: Qwen/Qwen3.5-2B
+    instance_type: p5.48xlarge
+    nodes: 1
+    params: {train_batch_size: 32, rollout_n: 8, lr: 5.0e-6, total_training_steps: 60, max_model_len: 4096, max_prompt_length: 2048, max_response_length: 4096, kl_loss_coef: 0.001, save_freq: 10, test_freq: 10, gpu_memory_utilization: 0.4}
+  - id: qwen3-4b-8gpu
+    label: {en: "Qwen3-4B-Instruct-2507 · 8×GPU · FSDP full (repo recipe)", zh-CN: "Qwen3-4B-Instruct-2507 · 8×GPU · FSDP 全参（仓库配方）"}
+    model_id: Qwen/Qwen3-4B-Instruct-2507
+    instance_type: p5.48xlarge
+    nodes: 1
+    params: {train_batch_size: 64, rollout_n: 4, lr: 5.0e-6, total_epochs: 1, max_model_len: 16384, max_prompt_length: 14336, max_response_length: 16384, max_tokens_per_turn: 2048, kl_loss_coef: 0.001, save_freq: 20, test_freq: 10, gpu_memory_utilization: 0.5}

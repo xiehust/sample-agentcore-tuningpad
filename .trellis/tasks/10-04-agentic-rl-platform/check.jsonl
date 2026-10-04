@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/launchpad-architecture.md", "reason": "UI/骨架来源与可复用部件"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/toolkit-core.md", "reason": "ART 契约、参数、数据集格式"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/aws-experiment-workflow.md", "reason": "AWS 流水线、IAM、护栏、指标"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/design.md", "reason": "技术设计"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/generalization-distributed.md", "reason": "模型/机型/分布式设计依据"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/officebench-template.md", "reason": "OfficeBench 模板要求"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/hyperpod-eks-cluster.md", "reason": "HyperPod EKS 设计依据"}
+{"file": ".trellis/tasks/10-04-agentic-rl-platform/research/hyperpod-eks-workloads.md", "reason": "HyperPod EKS 设计依据"}

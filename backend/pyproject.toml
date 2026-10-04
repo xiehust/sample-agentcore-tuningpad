@@ -1,0 +1,60 @@
+[project]
+name = "tuningpad-backend"
+version = "0.1.0"
+description = "TuningPad control plane: no-code agentic RL training on SageMaker HyperPod (EKS) + Bedrock AgentCore"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.139.0",
+    "uvicorn[standard]==0.51.0",
+    "sqlalchemy==2.0.51",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "pyyaml==6.0.3",
+    "itsdangerous==2.2.0",
+    "python-multipart==0.0.20",
+    "boto3==1.43.83",
+    "kubernetes==36.0.3",
+    "huggingface-hub==0.36.0",
+    "pandas==2.3.3",
+    "pyarrow==21.0.0",
+    "agentcore-rl-toolkit",
+    "aws-bedrock-token-generator==1.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.14.0",
+    "pytest==8.4.2",
+    "pytest-xdist==3.8.0",
+    "httpx==0.28.1",
+]
+
+[tool.uv.sources]
+# The toolkit is consumed from the sibling checkout (config.toolkit_path); the same
+# source tree is baked into agent and trainer images so all three stay in lockstep.
+agentcore-rl-toolkit = { path = "../../agentcore-rl-toolkit", editable = true }
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+# Hydra override keys are long literal data
+"app/render/train.py" = ["E501"]
+"app/services/serving.py" = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency markers are idiomatic in signatures
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Depends"]

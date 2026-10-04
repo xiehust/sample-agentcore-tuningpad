@@ -1,0 +1,43 @@
+/* ============ TuningPad additions on top of the launchpad V2 kit ============ */
+.v2 .tp-error { color: var(--v2-danger); font-size: 13px; }
+.v2 .tp-mono { font-family: var(--v2-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.v2 .tp-grid { display: grid; gap: 16px; }
+.v2 .tp-grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.v2 .tp-grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.v2 .tp-grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.v2 .tp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.v2 .tp-row.end { justify-content: flex-end; }
+.v2 .tp-stack { display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 1100px) {
+  .v2 .tp-grid.c3, .v2 .tp-grid.c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* job log tail */
+.v2 .tp-log { max-height: 380px; font-size: 12px; line-height: 1.55; }
+
+/* stage bar */
+.v2 .tp-stages { display: flex; flex-wrap: wrap; gap: 8px; }
+.v2 .tp-stage {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 14px;
+  border: 1px solid var(--v2-line); background: #fff; font-size: 12.5px; color: var(--v2-ink-2);
+}
+.v2 .tp-stage .n {
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; background: var(--v2-fill-2); color: var(--v2-ink-3);
+}
+.v2 .tp-stage.running { border-color: var(--v2-primary-line); color: var(--v2-primary); background: var(--v2-primary-soft); }
+.v2 .tp-stage.running .n { background: var(--v2-primary); color: #fff; }
+.v2 .tp-stage.succeeded .n { background: var(--v2-success); color: #fff; }
+.v2 .tp-stage.failed { border-color: var(--v2-danger); color: var(--v2-danger); }
+.v2 .tp-stage.failed .n { background: var(--v2-danger); color: #fff; }
+.v2 .tp-stage .d { color: var(--v2-ink-3); }
+
+/* line charts */
+.v2 .tp-chart { width: 100%; height: auto; max-height: 220px; display: block; }
+.v2 .tp-chart text { font-size: 11px; fill: var(--v2-ink-3); font-family: var(--v2-font); }
+.v2 .tp-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--v2-ink-2); margin-top: 8px; }
+.v2 .tp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.v2 .tp-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* template / option tiles */
+.v2 .tp-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }

@@ -1,0 +1,19 @@
+# CodeBuild (privileged, x86_64) — source is the S3 zip TuningPad uploads:
+#   Dockerfile, buildspec.yml, toolkit/ (git-tracked files of the toolkit checkout)
+version: 0.2
+env:
+  variables:
+    PROFILE: fsdp
+    IMAGE_URI: ""
+phases:
+  pre_build:
+    commands:
+      - REGISTRY="${IMAGE_URI%%/*}"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+      - docker login --help >/dev/null
+  build:
+    commands:
+      - docker build --build-arg PROFILE="$PROFILE" -t "$IMAGE_URI" .
+  post_build:
+    commands:
+      - test "$CODEBUILD_BUILD_SUCCEEDING" = "1" && docker push "$IMAGE_URI"
