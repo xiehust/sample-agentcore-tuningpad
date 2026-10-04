@@ -421,3 +421,58 @@ def test_asg_found_by_tag_while_creating(stub_aws):
     ng = {"nodegroupName": "ec2-p5", "clusterName": "eks", "resources": {}}
     assert ngs.asg_names("us-east-1", ng) == ["eks-x"]
     assert ngs.asg_counts("us-east-1", ng) == {"running": 1, "in_service": 0}
+
+
+def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkeypatch):
+    from app.models import Agent, AgentRuntime
+    from app.pipelines import cluster as pc
+
+    _cluster(cfn_stack=None)
+    with session_scope() as s:
+        s.get(Cluster, "cl-1").network = {"private_subnets": ["subnet-a"]}
+        s.add(Agent(id="ag-1", name="a", source="template", config={}, status="ready", checks={}))
+        s.flush()
+        s.add(
+            AgentRuntime(
+                id="rt-1",
+                agent_id="ag-1",
+                cluster_id="cl-1",
+                region="us-east-1",
+                runtime_id="tp_x-1",
+                status="ready",
+            )
+        )
+    enis = iter(
+        [{"NetworkInterfaces": [{"NetworkInterfaceId": "eni-1"}]}, {"NetworkInterfaces": []}]
+    )
+    acc = StubClient(delete_agent_runtime={})
+    stub_aws(
+        {
+            "bedrock-agentcore-control": acc,
+            "ec2": StubClient(describe_network_interfaces=lambda **kw: next(enis)),
+        }
+    )
+
+    class Ctx:
+        target_id = "cl-1"
+        context: dict = {}
+
+        def set(self, k, v):
+            self.context = {**self.context, k: v}
+
+        def log(self, m):
+            pass
+
+        def detail(self, m):
+            pass
+
+        def wait_until(self, fn, **kw):
+            while not fn():
+                pass
+
+    ctx = Ctx()
+    pc.stage_delete_runtimes(ctx)
+    assert acc.calls == [("delete_agent_runtime", {"agentRuntimeId": "tp_x-1"})]
+    assert ctx.context["runtimes_deleted"] == {"rt-1": True}  # a retry skips it
+    with session_scope() as s:
+        assert s.get(AgentRuntime, "rt-1").status == "deleted"

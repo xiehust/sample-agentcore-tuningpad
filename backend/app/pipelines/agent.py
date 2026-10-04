@@ -54,6 +54,7 @@ def load_runtime(rt_id: str) -> dict[str, Any]:
             "runtime_id": r.runtime_id,
             "runtime_arn": r.runtime_arn,
             "image_uri": r.image_uri,
+            "platform_version": r.platform_version,
             "status": r.status,
         }
 
@@ -187,24 +188,56 @@ def stage_deploy(ctx: StageContext) -> None:
         network = svc.network_config("PUBLIC")
         suffix = "smoke"
     name = svc.runtime_name(agent["name"], suffix)
-    out = svc.deploy_runtime(
-        rt["region"], name, agent["image_uri"], res["acr_role_arn"], network, rt["runtime_id"]
+    platform = svc.resolve_platform_version(
+        rt["region"], ctx.payload.get("platform_version") or rt["platform_version"]
     )
-    save_runtime(rt["id"], status="deploying", image_uri=agent["image_uri"], **out)
+    ready_timeout = svc.READY_TIMEOUT_S[platform]
+    existing_id = rt["runtime_id"] or (svc.find_runtime(rt["region"], name) or {}).get(
+        "agentRuntimeId"
+    )
+    if existing_id:
+        # an update while CREATING/UPDATING returns ConflictException (V2 stays there minutes)
+        ctx.wait_until(
+            lambda: not svc.runtime_busy(svc.runtime_status(rt["region"], existing_id)[0]),
+            timeout_s=ready_timeout,
+            interval_s=10,
+            what="runtime to leave its in-progress state",
+        )
+    ctx.log(f"platform version {platform}")
+    out = svc.deploy_runtime(
+        rt["region"],
+        name,
+        agent["image_uri"],
+        res["acr_role_arn"],
+        network,
+        existing_id,
+        platform,
+    )
+    save_runtime(
+        rt["id"],
+        status="deploying",
+        image_uri=agent["image_uri"],
+        platform_version=platform,
+        **out,
+    )
     save_ids = dict(out)
     ctx.log(f"runtime {name}: {out}")
 
     def ready():
-        status, reason = svc.runtime_status(rt["region"], save_ids["runtime_id"])
+        info = svc.runtime_info(rt["region"], save_ids["runtime_id"])
+        status, reason = info["status"], info["reason"]
         ctx.detail(status)
         if "FAILED" in status:
             raise AppError(
                 "agent.runtime_failed", f"runtime {status}: {reason}", detail={"reason": reason}
             )
-        return status == "READY"
+        if status == "READY":
+            save_runtime(rt["id"], platform_version=info["platform_version"])
+            return True
+        return False
 
     try:
-        ctx.wait_until(ready, timeout_s=900, interval_s=10, what="runtime READY")
+        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
     except AppError as e:
         supported = svc.supported_az_ids((e.detail or {}).get("reason") or "")
         if rt["network_mode"] != "VPC" or not supported:
@@ -228,11 +261,11 @@ def stage_deploy(ctx: StageContext) -> None:
         )
         network = svc.network_config("VPC", subnets, network["networkModeConfig"]["securityGroups"])
         out = svc.deploy_runtime(
-            rt["region"], name, agent["image_uri"], res["acr_role_arn"], network, None
+            rt["region"], name, agent["image_uri"], res["acr_role_arn"], network, None, platform
         )
         save_runtime(rt["id"], **out)
         save_ids.update(out)
-        ctx.wait_until(ready, timeout_s=900, interval_s=10, what="runtime READY")
+        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
 
 
 def stage_smoke(ctx: StageContext) -> None:

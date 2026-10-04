@@ -72,6 +72,25 @@ def init_db(url: str | None = None) -> None:
     from .. import models  # noqa: F401  (register mappers)
 
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
+
+
+def _add_missing_columns(eng) -> None:
+    """create_all never alters existing tables: add new nullable columns in place so an
+    existing data/tuningpad.db keeps working after a model gains a column."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(eng)
+    with eng.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have or not col.nullable or col.primary_key:
+                    continue
+                ddl = col.type.compile(dialect=eng.dialect)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}'))
 
 
 @contextmanager

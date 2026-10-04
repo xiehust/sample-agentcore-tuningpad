@@ -280,3 +280,160 @@ def test_supported_az_parse():
     )
     assert svc.supported_az_ids(r) == ["use1-az4", "use1-az1", "use1-az2"]
     assert svc.supported_az_ids("other") == []
+
+
+# ---------------- AgentCore Runtime platform version ----------------
+
+
+def test_resolve_platform_version(monkeypatch):
+    assert svc.resolve_platform_version("us-west-2", "auto") == "V2"
+    assert svc.resolve_platform_version("ap-southeast-1", "auto") == "V1"
+    assert svc.resolve_platform_version("ap-southeast-1", "V1") == "V1"
+    assert svc.resolve_platform_version("us-east-1", None) == "V2"  # settings default: auto
+    with pytest.raises(AppError) as e:
+        svc.resolve_platform_version("ap-southeast-1", "V2")
+    assert e.value.code == "agent.platform_unsupported_region"
+    with pytest.raises(AppError) as e:
+        svc.resolve_platform_version("us-east-1", "V3")
+    assert e.value.code == "agent.bad_platform_version"
+
+
+def test_deploy_runtime_sends_platform_version_on_create_and_update(stub_aws):
+    from tests.conftest import StubClient
+
+    ctl = StubClient(
+        list_agent_runtimes={"agentRuntimes": []},
+        create_agent_runtime={"agentRuntimeId": "rt-1", "agentRuntimeArn": "arn:rt-1"},
+        update_agent_runtime={"agentRuntimeId": "rt-1", "agentRuntimeArn": "arn:rt-1"},
+    )
+    stub_aws({"bedrock-agentcore-control": ctl})
+    net = svc.network_config("PUBLIC")
+    svc.deploy_runtime("us-east-1", "n", "img", "role", net, None, "V2")
+    svc.deploy_runtime("us-east-1", "n", "img", "role", net, "rt-1", "V1")
+    calls = {name: kw for name, kw in ctl.calls if name != "list_agent_runtimes"}
+    assert calls["create_agent_runtime"]["platformVersion"] == "V2"
+    assert calls["update_agent_runtime"]["platformVersion"] == "V1"
+    assert calls["update_agent_runtime"]["agentRuntimeId"] == "rt-1"
+
+
+class _Ctx:
+    def __init__(self, target_id, payload):
+        self.target_id, self.payload, self.context, self.logs = target_id, payload, {}, []
+
+    def log(self, m):
+        self.logs.append(m)
+
+    def detail(self, _):
+        pass
+
+    def set(self, k, v):
+        self.context[k] = v
+
+    def wait_until(self, probe, *, timeout_s, interval_s=10, what=""):
+        for _ in range(10):
+            if r := probe():
+                return r
+        raise AssertionError(f"never: {what}")
+
+
+def _seed_agent_runtime(rt_id="rt-local", runtime_id=None):
+    from app.core.db import session_scope
+    from app.models import Agent, AgentRuntime
+
+    with session_scope() as s:
+        s.add(
+            Agent(
+                id="ag-pv",
+                name="pv",
+                source="image",
+                config={"region": "us-east-1"},
+                image_uri="111.dkr.ecr.us-east-1.amazonaws.com/a:1",
+                status="ready",
+                checks={},
+            )
+        )
+        s.add(
+            AgentRuntime(
+                id=rt_id,
+                agent_id="ag-pv",
+                region="us-east-1",
+                network_mode="PUBLIC",
+                runtime_id=runtime_id,
+                status="queued",
+            )
+        )
+
+
+def test_stage_deploy_v2_waits_for_busy_runtime_and_records_version(stub_aws, monkeypatch):
+    from tests.conftest import StubClient
+
+    monkeypatch.setattr(pa.proj, "require_region", lambda r: {"acr_role_arn": "arn:role"})
+    _seed_agent_runtime(runtime_id="rt-1")
+    statuses = iter(["UPDATING", "READY", "UPDATING", "READY"])
+    ctl = StubClient(
+        get_agent_runtime=lambda **_: {"status": next(statuses), "platformVersion": "V2"},
+        update_agent_runtime={"agentRuntimeId": "rt-1", "agentRuntimeArn": "arn:rt-1"},
+    )
+    stub_aws({"bedrock-agentcore-control": ctl})
+    pa.stage_deploy(_Ctx("rt-local", {"platform_version": "auto"}))
+    names = [n for n, _ in ctl.calls]
+    # busy runtime polled before the update, so no ConflictException
+    assert names.index("update_agent_runtime") > names.index("get_agent_runtime")
+    upd = next(kw for n, kw in ctl.calls if n == "update_agent_runtime")
+    assert upd["platformVersion"] == "V2"
+    assert pa.load_runtime("rt-local")["platform_version"] == "V2"
+
+
+def test_stage_deploy_keeps_stored_version_without_request(stub_aws, monkeypatch):
+    from tests.conftest import StubClient
+
+    monkeypatch.setattr(pa.proj, "require_region", lambda r: {"acr_role_arn": "arn:role"})
+    _seed_agent_runtime()
+    pa.save_runtime("rt-local", platform_version="V1")
+    ctl = StubClient(
+        list_agent_runtimes={"agentRuntimes": []},
+        create_agent_runtime={"agentRuntimeId": "rt-9", "agentRuntimeArn": "arn:rt-9"},
+        get_agent_runtime={"status": "READY"},  # no platformVersion field → V1
+    )
+    stub_aws({"bedrock-agentcore-control": ctl})
+    pa.stage_deploy(_Ctx("rt-local", {}))
+    create = next(kw for n, kw in ctl.calls if n == "create_agent_runtime")
+    assert create["platformVersion"] == "V1"
+    assert pa.load_runtime("rt-local")["platform_version"] == "V1"
+
+
+def test_deploy_endpoint_rejects_v2_in_unsupported_region(client):
+    from app.core.db import session_scope
+    from app.models import Agent
+
+    with session_scope() as s:
+        s.add(
+            Agent(
+                id="ag-x",
+                name="x",
+                source="image",
+                config={"region": "sa-east-1"},
+                status="ready",
+                checks={},
+            )
+        )
+    r = client.post("/api/agents/ag-x/runtimes", json={"platform_version": "V2"})
+    assert r.status_code >= 400
+    assert "agent.platform_unsupported_region" in r.text
+    r = client.post("/api/agents/ag-x/runtimes", json={"platform_version": "V9"})
+    assert r.status_code == 422
+
+
+def test_init_db_adds_new_nullable_columns(tmp_path):
+    import sqlalchemy as sa
+
+    from app.core import db
+
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    eng = sa.create_engine(url)
+    with eng.begin() as c:
+        c.execute(sa.text("CREATE TABLE agent_runtimes (id VARCHAR(64) PRIMARY KEY)"))
+    db.init_db(url)
+    cols = {c["name"] for c in sa.inspect(sa.create_engine(url)).get_columns("agent_runtimes")}
+    assert {"platform_version", "runtime_arn", "cluster_id"} <= cols
+    assert "last_smoke" not in cols  # NOT NULL columns are never added in place

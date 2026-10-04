@@ -594,6 +594,48 @@ def stage_delete_nodegroups(ctx: StageContext) -> None:
             ctx.log(f"node role cleanup: {e}")
 
 
+def stage_delete_runtimes(ctx: StageContext) -> None:
+    """VPC-mode AgentCore runtimes hold ENIs in the cluster subnets: the stack cannot delete
+    the subnets until they are gone."""
+    from ..models import AgentRuntime
+    from ..services import agents as asvc
+
+    c = load(ctx.target_id)
+    with session_scope() as s:
+        rts = [
+            (r.id, r.runtime_id)
+            for r in s.query(AgentRuntime).filter(AgentRuntime.cluster_id == c["id"])
+            if r.runtime_id and r.status != "deleted"
+        ]
+    for row_id, rid in rts:
+        if (ctx.context.get("runtimes_deleted") or {}).get(row_id):
+            continue  # deleting an already-deleted runtime returns AccessDenied, not NotFound
+        asvc.delete_runtime(c["region"], rid)
+        ctx.set("runtimes_deleted", {**(ctx.context.get("runtimes_deleted") or {}), row_id: True})
+        ctx.log(f"deleted AgentCore runtime {rid}")
+    subnets = c["network"].get("private_subnets") or []
+    if subnets and c["source"] == "create":
+        ec2 = aws.client("ec2", c["region"])
+
+        def released():
+            enis = ec2.describe_network_interfaces(
+                Filters=[
+                    {"Name": "subnet-id", "Values": subnets},
+                    {"Name": "interface-type", "Values": ["agentic_ai"]},
+                ]
+            )["NetworkInterfaces"]
+            ctx.detail(f"{len(enis)} AgentCore ENI(s) left")
+            return not enis
+
+        # AgentCore releases VPC ENIs asynchronously, sometimes hours after the runtime is gone
+        ctx.wait_until(released, timeout_s=8 * 3600, interval_s=60, what="AgentCore ENI release")
+    with session_scope() as s:
+        for rid, _ in rts:
+            r = s.get(AgentRuntime, rid)
+            if r:
+                r.status = "deleted"
+
+
 def stage_delete_workloads(ctx: StageContext) -> None:
     c = load(ctx.target_id)
     if not c["eks_name"]:
@@ -635,7 +677,9 @@ def stage_delete_cluster(ctx: StageContext) -> None:
             except Exception as e:
                 ctx.log(f"revoke rules from cluster SG failed: {e}")
     if c["cfn_stack"] and hp.stack_status(region, c["cfn_stack"]):
+        # also re-issues the delete after a DELETE_FAILED (e.g. once blocking ENIs are gone)
         aws.client("cloudformation", region).delete_stack(StackName=c["cfn_stack"])
+        ctx.sleep(15)
 
         def gone():
             st = hp.stack_status(region, c["cfn_stack"])
@@ -673,6 +717,7 @@ register(
     [
         Stage("workloads", stage_delete_workloads),
         Stage("nodegroups", stage_delete_nodegroups),
+        Stage("runtimes", stage_delete_runtimes),
         Stage("cluster", stage_delete_cluster),
     ],
     on_finish=_on_deleted,

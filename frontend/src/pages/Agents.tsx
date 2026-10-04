@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { JobPanel } from "../components/JobPanel";
 import { StatusTag } from "../components/StatusTag";
-import { agentApi, clusterApi, errorMessage, type AgentView, type Template } from "../lib/api";
+import { agentApi, clusterApi, errorMessage, type AgentView, type PlatformChoice, type Template } from "../lib/api";
 import { useLocalized } from "../lib/localized";
 import { dateTime } from "../lib/format";
 import { DETAIL_POLL_MS, LIST_POLL_MS, usePoll } from "../lib/poll";
@@ -233,6 +233,7 @@ function AgentDetail({ id }: { id: string }) {
   const a = useLoad(() => agentApi.get(id), id);
   const clusters = useLoad(clusterApi.list, "clusters");
   const [target, setTarget] = useState<string>("smoke");
+  const [platform, setPlatform] = useState<PlatformChoice>("auto");
   const [jobId, setJobId] = useState<string | null>(null);
   const [del, setDel] = useState(false);
   const live = a.data && (["queued", "building"].includes(a.data.status) || a.data.runtimes.some((r) => ["queued", "deploying"].includes(r.status)));
@@ -241,7 +242,7 @@ function AgentDetail({ id }: { id: string }) {
   const ag: AgentView = a.data;
   const deploy = async () => {
     try {
-      const r = await agentApi.deploy(id, { cluster_id: target === "smoke" ? null : target });
+      const r = await agentApi.deploy(id, { cluster_id: target === "smoke" ? null : target, platform_version: platform });
       setJobId(r.job_id);
       a.reload();
     } catch (err) {
@@ -287,6 +288,11 @@ function AgentDetail({ id }: { id: string }) {
                 onChange={setTarget}
                 options={[{ value: "smoke", label: t("agents.smokeRuntimeOpt") }, ...readyClusters.map((c) => ({ value: c.id, label: t("agents.clusterRuntimeOpt", { name: c.name }) }))]}
               />
+              <Select
+                value={platform}
+                onChange={(v) => setPlatform(v as PlatformChoice)}
+                options={(["auto", "V1", "V2"] as const).map((v) => ({ value: v, label: t(`agents.platform_${v}`) }))}
+              />
               <Button kind="primary" size="sm" disabled={ag.status !== "ready"} onClick={() => void deploy()} testId="tp-agent-deploy">{t("agents.deploy")}</Button>
             </div>
           }
@@ -299,6 +305,7 @@ function AgentDetail({ id }: { id: string }) {
             columns={[
               { key: "m", title: t("agents.network"), render: (r) => (r.network_mode === "VPC" ? t("agents.vpcRuntime") : t("agents.smokeRuntime")) },
               { key: "c", title: t("nav.clusters"), render: (r) => (clusters.data ?? []).find((c) => c.id === r.cluster_id)?.name ?? "—" },
+              { key: "pv", title: t("agents.platformVersion"), render: (r) => r.platform_version ?? "—" },
               { key: "s", title: t("common.status"), render: (r) => <StatusTag status={r.status} /> },
               { key: "id", title: "Runtime", render: (r) => <span className="tp-mono">{r.runtime_id ?? "—"}</span> },
               {

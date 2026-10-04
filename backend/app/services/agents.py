@@ -365,6 +365,35 @@ def find_runtime(region: str, name: str) -> dict[str, Any] | None:
             return None
 
 
+# AgentCore Runtime platform versions: V1 initializes the container on every cold start;
+# V2 restores a snapshot taken after the first healthy /ping (consistent cold starts,
+# pay-for-use memory) but create/update take minutes. V2 is offered in these regions only.
+PLATFORM_VERSIONS = ("V1", "V2")
+PLATFORM_CHOICES = ("auto", *PLATFORM_VERSIONS)
+V2_REGIONS = frozenset({"us-east-1", "us-east-2", "us-west-2", "eu-west-1", "ap-northeast-1"})
+# terminal-state wait for create/update; V2 prepares a snapshot first
+READY_TIMEOUT_S = {"V1": 900, "V2": 1800}
+
+
+def resolve_platform_version(region: str, requested: str | None) -> str:
+    """`auto` (or empty) → V2 where offered, else V1. An explicit V2 must be offered."""
+    choice = requested or get_settings().agent_platform_version
+    if choice not in PLATFORM_CHOICES:
+        raise AppError(
+            "agent.bad_platform_version",
+            f"platform version must be one of {', '.join(PLATFORM_CHOICES)}",
+        )
+    if choice == "auto":
+        return "V2" if region in V2_REGIONS else "V1"
+    if choice == "V2" and region not in V2_REGIONS:
+        raise AppError(
+            "agent.platform_unsupported_region",
+            f"AgentCore Runtime V2 is not offered in {region}",
+            detail={"region": region, "supported": sorted(V2_REGIONS)},
+        )
+    return choice
+
+
 def deploy_runtime(
     region: str,
     name: str,
@@ -372,6 +401,7 @@ def deploy_runtime(
     role_arn: str,
     network: dict[str, Any],
     runtime_id: str | None = None,
+    platform_version: str = "V1",
 ) -> dict[str, str]:
     ctl = aws.client("bedrock-agentcore-control", region)
     common = {
@@ -381,6 +411,8 @@ def deploy_runtime(
         "protocolConfiguration": {"serverProtocol": "HTTP"},
         # long agent rollouts: keep sessions alive up to the 8h maximum
         "lifecycleConfiguration": {"idleRuntimeSessionTimeout": 900, "maxLifetime": 28800},
+        # always explicit: an omitted value on update keeps the runtime's current version
+        "platformVersion": platform_version,
     }
     existing = {"agentRuntimeId": runtime_id} if runtime_id else find_runtime(region, name)
     if existing:
@@ -401,9 +433,25 @@ def subnets_in_azs(region: str, subnets: list[str], az_ids: list[str]) -> list[s
     return [s["SubnetId"] for s in found if s["AvailabilityZoneId"] in az_ids]
 
 
-def runtime_status(region: str, runtime_id: str) -> tuple[str, str | None]:
+def runtime_info(region: str, runtime_id: str) -> dict[str, Any]:
+    """Status, failure reason and the platform version AgentCore actually applied
+    (create/update responses do not return it)."""
     r = aws.client("bedrock-agentcore-control", region).get_agent_runtime(agentRuntimeId=runtime_id)
-    return r["status"], r.get("failureReason")
+    return {
+        "status": r["status"],
+        "reason": r.get("failureReason"),
+        "platform_version": r.get("platformVersion") or "V1",
+    }
+
+
+def runtime_status(region: str, runtime_id: str) -> tuple[str, str | None]:
+    info = runtime_info(region, runtime_id)
+    return info["status"], info["reason"]
+
+
+def runtime_busy(status: str) -> bool:
+    """CREATING / UPDATING / DELETING: update or delete now returns ConflictException."""
+    return status.endswith("ING")
 
 
 def delete_runtime(region: str, runtime_id: str) -> None:
@@ -412,8 +460,12 @@ def delete_runtime(region: str, runtime_id: str) -> None:
             agentRuntimeId=runtime_id
         )
     except ClientError as e:
-        if e.response["Error"]["Code"] != "ResourceNotFoundException":
-            raise
+        code, msg = e.response["Error"]["Code"], e.response["Error"].get("Message", "")
+        if code == "ResourceNotFoundException":
+            return
+        if code == "ConflictException" and "DELETING" in msg:
+            return  # a delete is already in flight
+        raise
 
 
 # ---------------- smoke ----------------

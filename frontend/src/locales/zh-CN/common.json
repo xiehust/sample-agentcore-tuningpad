@@ -125,7 +125,9 @@
     "nodegroup.no_subnet": "集群没有私有子网",
     "nodegroup.no_security_group": "集群没有可加入的安全组",
     "nodegroup.az_not_in_cluster": "集群在该可用区没有子网",
-    "cluster.not_ready": "集群尚未就绪"
+    "cluster.not_ready": "集群尚未就绪",
+    "agent.platform_unsupported_region": "该区域暂不支持 AgentCore Runtime V2，请选择 V1 或自动",
+    "agent.bad_platform_version": "平台版本只能是自动、V1 或 V2"
   },
   "common": {
     "apply": "应用",
@@ -521,7 +523,11 @@
     "rebuild": "重新构建",
     "reinspect": "重新检查",
     "deleteTitle": "删除 Agent？",
-    "deleteBody": "删除 {{name}} 及其 AgentCore Runtime，ECR 中的镜像保留。"
+    "deleteBody": "删除 {{name}} 及其 AgentCore Runtime，ECR 中的镜像保留。",
+    "platformVersion": "平台版本",
+    "platform_auto": "可用时使用 Runtime V2",
+    "platform_V1": "Runtime V1",
+    "platform_V2": "Runtime V2（快照）"
   },
   "datasets": {
     "create": "新建数据集",

@@ -68,6 +68,8 @@ class AgentRuntime(Base, TimestampMixin):
     runtime_id: Mapped[str | None] = mapped_column(String(128))
     runtime_arn: Mapped[str | None] = mapped_column(String(512))
     image_uri: Mapped[str | None] = mapped_column(String(512))
+    # requested before deploy, then the version AgentCore reports (V1 | V2)
+    platform_version: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(32), default="pending")
     last_smoke: Mapped[dict] = mapped_column(JSON, default=dict)
 

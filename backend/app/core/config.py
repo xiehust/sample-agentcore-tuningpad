@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     # --- AWS ---
     default_region: str = "us-east-1"
     resource_tag: str = "tuningpad"  # value of the Project tag on everything we create
+    # AgentCore Runtime platform version for new deploys: auto (V2 where offered) | V1 | V2
+    agent_platform_version: str = "auto"
 
     # --- toolkit ---
     toolkit_path: Path = REPO_ROOT.parent / "agentcore-rl-toolkit"

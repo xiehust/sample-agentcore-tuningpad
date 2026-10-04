@@ -7,6 +7,7 @@ labelled `app.kubernetes.io/managed-by=tuningpad`.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import subprocess
 import tempfile
@@ -173,9 +174,15 @@ def helm(region: str, eks_name: str, args: list[str], timeout: int = 900) -> str
             "KUBECONFIG": kc,
             "HELM_CACHE_HOME": tempfile.gettempdir() + "/tp-helm",
         }
-        proc = subprocess.run(
-            [helm_bin, *args], capture_output=True, text=True, env=env, timeout=timeout
-        )
+
+        def run(argv: list[str], t: int = timeout) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [helm_bin, *argv], capture_output=True, text=True, env=env, timeout=t
+            )
+
+        if args[:2] == ["upgrade", "--install"]:
+            _clear_stuck_release(run, args)
+        proc = run(args)
     if proc.returncode != 0:
         raise AppError(
             "helm.failed",
@@ -183,6 +190,36 @@ def helm(region: str, eks_name: str, args: list[str], timeout: int = 900) -> str
             detail=(proc.stderr or proc.stdout)[-4000:],
         )
     return proc.stdout
+
+
+def _clear_stuck_release(run, args: list[str]) -> None:
+    """A helm process killed mid-operation (backend restart during `--wait`) leaves the
+    release `pending-*`, and every later `upgrade --install` fails with "another operation
+    is in progress" / "release: already exists". Undo the interrupted operation first:
+    a pending first install is uninstalled, a pending upgrade/rollback is rolled back."""
+    release = args[2]
+    ns = args[args.index("--namespace") + 1] if "--namespace" in args else "default"
+    st = run(["status", release, "--namespace", ns, "-o", "json"], 60)
+    if st.returncode != 0:
+        return  # no such release
+    try:
+        info = json.loads(st.stdout)
+    except ValueError:
+        return
+    status = (info.get("info") or {}).get("status", "")
+    if not status.startswith("pending"):
+        return
+    if status == "pending-install" or int(info.get("version") or 1) <= 1:
+        fix = ["uninstall", release, "--namespace", ns, "--wait"]
+    else:
+        fix = ["rollback", release, "--namespace", ns, "--wait"]
+    proc = run(fix, 600)
+    if proc.returncode != 0:
+        raise AppError(
+            "helm.failed",
+            f"helm release {release} is stuck in {status} and could not be cleared",
+            detail=(proc.stderr or proc.stdout)[-4000:],
+        )
 
 
 def b64(s: str) -> str:

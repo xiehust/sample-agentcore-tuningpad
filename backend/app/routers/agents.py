@@ -38,6 +38,7 @@ def _runtime_view(r: AgentRuntime) -> dict[str, Any]:
         "runtime_id": r.runtime_id,
         "runtime_arn": r.runtime_arn,
         "image_uri": r.image_uri,
+        "platform_version": r.platform_version,
         "status": r.status,
         "last_smoke": r.last_smoke or {},
         "job": job_view(j) if j else None,
@@ -187,6 +188,8 @@ class DeployBody(BaseModel):
     cluster_id: str | None = None  # None → standalone PUBLIC smoke runtime
     smoke_payloads: list[dict[str, Any]] | None = None
     skip_smoke: bool = False
+    # None → keep the runtime's current version (or the configured default for a new one)
+    platform_version: str | None = Field(default=None, pattern="^(auto|V1|V2)$")
 
 
 @router.post("/{agent_id}/runtimes")
@@ -200,6 +203,9 @@ def deploy(agent_id: str, body: DeployBody):
             region, mode = c.region, "VPC"
         else:
             region, mode = a["config"].get("region") or get_settings().default_region, "PUBLIC"
+        # fail fast (e.g. V2 in a region without it) instead of inside the job
+        if body.platform_version:
+            svc.resolve_platform_version(region, body.platform_version)
         existing = (
             s.query(AgentRuntime)
             .filter(
@@ -225,7 +231,11 @@ def deploy(agent_id: str, body: DeployBody):
                     status="queued",
                 )
             )
-    payload = {"smoke_payloads": body.smoke_payloads, "skip_smoke": body.skip_smoke}
+    payload = {
+        "smoke_payloads": body.smoke_payloads,
+        "skip_smoke": body.skip_smoke,
+        "platform_version": body.platform_version,
+    }
     return {"id": rt_id, "job_id": get_engine().start("agent.deploy", rt_id, payload)}
 
 

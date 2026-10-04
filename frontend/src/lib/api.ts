@@ -493,6 +493,8 @@ export interface Template {
   presets: TemplatePreset[];
 }
 
+export type PlatformChoice = "auto" | "V1" | "V2";
+
 export interface AgentRuntimeView {
   id: string;
   cluster_id: string | null;
@@ -501,6 +503,7 @@ export interface AgentRuntimeView {
   runtime_id: string | null;
   runtime_arn: string | null;
   image_uri: string | null;
+  platform_version: "V1" | "V2" | null;
   status: string;
   last_smoke: { ok?: boolean; passed?: number; total?: number; model_id?: string; results?: { index: number; ok: boolean; rewards?: unknown; error?: string | null }[] };
   job: Job | null;
@@ -529,7 +532,7 @@ export const agentApi = {
     post<{ id: string; job_id: string }>("/api/agents", body),
   upload: (form: FormData) => requestForm<{ id: string; job_id: string }>("/api/agents/upload", form),
   rebuild: (id: string) => post<{ job_id: string }>(`/api/agents/${id}/rebuild`),
-  deploy: (id: string, body: { cluster_id: string | null; smoke_payloads?: unknown[] | null; skip_smoke?: boolean }) =>
+  deploy: (id: string, body: { cluster_id: string | null; smoke_payloads?: unknown[] | null; skip_smoke?: boolean; platform_version?: PlatformChoice }) =>
     post<{ id: string; job_id: string }>(`/api/agents/${id}/runtimes`, body),
   deleteRuntime: (id: string, rt: string) => del<{ ok: boolean }>(`/api/agents/${id}/runtimes/${rt}`),
   remove: (id: string) => del<{ ok: boolean }>(`/api/agents/${id}`),

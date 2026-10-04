@@ -80,3 +80,40 @@ def test_k8s_bearer_prefix_and_refresh(monkeypatch):
     assert cfg.auth_settings()["BearerToken"]["value"] == "Bearer t1"
     monkeypatch.setattr(k8s, "TOKEN_TTL_S", -1)
     assert cfg.auth_settings()["BearerToken"]["value"] == "Bearer t2"
+
+
+# ---------------- helm: stuck releases ----------------
+
+
+class _Proc:
+    def __init__(self, rc=0, out=""):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+@pytest.mark.parametrize(
+    "status,version,fix",
+    [
+        ("pending-install", 1, "uninstall"),
+        ("pending-upgrade", 3, "rollback"),
+        ("deployed", 2, None),
+        (None, 0, None),  # release absent
+    ],
+)
+def test_helm_clears_release_left_pending_by_interrupted_run(status, version, fix):
+    import json as _json
+
+    from app.services import kube
+
+    calls = []
+
+    def run(argv, t=0):
+        calls.append(argv[0])
+        if argv[0] == "status":
+            if status is None:
+                return _Proc(1)
+            return _Proc(0, _json.dumps({"info": {"status": status}, "version": version}))
+        return _Proc(0)
+
+    args = ["upgrade", "--install", "kuberay-operator", "c", "--namespace", "kuberay"]
+    kube._clear_stuck_release(run, args)
+    assert calls == ["status"] + ([fix] if fix else [])

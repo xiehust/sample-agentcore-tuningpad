@@ -4,3 +4,4 @@ default_region: us-east-1        # HyperPod GPU "for cluster usage" quota lives 
 # host: 127.0.0.1
 # toolkit_path: ../agentcore-rl-toolkit
 # resource_tag: tuningpad        # Project tag value on every resource TuningPad creates
+# agent_platform_version: auto    # AgentCore Runtime: auto (V2 where offered) | V1 | V2

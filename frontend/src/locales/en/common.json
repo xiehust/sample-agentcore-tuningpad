@@ -125,7 +125,9 @@
     "nodegroup.no_subnet": "The cluster has no private subnet",
     "nodegroup.no_security_group": "The cluster has no security group to join",
     "nodegroup.az_not_in_cluster": "The cluster has no subnet in that availability zone",
-    "cluster.not_ready": "The cluster is not ready"
+    "cluster.not_ready": "The cluster is not ready",
+    "agent.platform_unsupported_region": "AgentCore Runtime V2 is not available in this region; choose V1 or Auto",
+    "agent.bad_platform_version": "Platform version must be Auto, V1 or V2"
   },
   "common": {
     "apply": "Apply",
@@ -521,7 +523,11 @@
     "rebuild": "Rebuild",
     "reinspect": "Re-inspect",
     "deleteTitle": "Delete agent?",
-    "deleteBody": "Deletes {{name}} and its AgentCore runtimes. Images in ECR are kept."
+    "deleteBody": "Deletes {{name}} and its AgentCore runtimes. Images in ECR are kept.",
+    "platformVersion": "Platform",
+    "platform_auto": "Runtime V2 where available",
+    "platform_V1": "Runtime V1",
+    "platform_V2": "Runtime V2 (snapshot)"
   },
   "datasets": {
     "create": "New dataset",
