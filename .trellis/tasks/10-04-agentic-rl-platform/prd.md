@@ -121,10 +121,10 @@
   - 能查询 training plan 报价。
   - 新建集群的 CFN 模板参数通过 validate-template。
 - [ ] 上传不符合契约的数据集或镜像时，UI 显示具体错误，而不是 500。
-- [ ] 需要用户批准费用，单独执行（(a)(b) 已完成；(c) 训练已跑通，EFA 传输还需日志确认）：
+- [ ] 需要用户批准费用，单独执行（(a)(b)(c) 均已完成）：
   - [x] (a) 创建 HyperPod EKS 集群，只含 system 实例组（CPU，低成本），安装平台组件；在集群 VPC 中部署 GSM8K 模板 agent（VPC 模式）并通过冒烟。
   - [x] (b) 1×p5（或 p4d）实例组扩容，跑 2 步的 GSM8K 冒烟训练：曲线有数据点，checkpoint 写入 FSx；导出 HF 模型到 S3；部署 vLLM 推理；对 base 和训练后的模型各跑一次小规模评估；最后缩容到 0。
-  - [ ] (c) 可选，另行批准：2 节点 EFA 冒烟训练。
+  - [x] (c) 可选，另行批准：2 节点 EFA 冒烟训练。
 - [ ] 资源页能列出测试过程中产生的资源，并可以清理（包括删除集群）。
 
 ## 验证记录
@@ -143,6 +143,15 @@
   - 两个 Pod 都看到了 32 个 EFA 设备，`fi_info -p efa` 正常，aws-ofi-nccl 插件存在，`FI_PROVIDER=efa`。
   - **还没有日志证据证明 NCCL 实际走的是 EFA**：当时 `NCCL_DEBUG=WARN`，容器内也读不到 EFA 硬件计数器。现已在多节点下改为 `NCCL_DEBUG=INFO`，`NCCL_DEBUG_SUBSYS=INIT,NET`，下次多节点训练时确认。
   - 训练结束后 RayCluster 仍按 TTL 保留 600 秒，导致节点 drain 时 GPU 多计费约 10 分钟。已改为训练结束时立即删除 RayJob。
+- 2026-10-05 (c) 复验（run-48dd594834，提交 080877b 之后）：
+  - 2 步训练成功，reward 从 0.28 到 0.67，GPU 费用约 $14。
+  - 训练日志证明 NCCL 走的是 EFA：
+    - 加载了 aws-ofi-nccl 1.17.2。
+    - `Selected provider is efa, fabric is efa-direct (found 32 nics)`。
+    - `Using transport protocol RDMA`。
+    - 通信器 `nranks 16`，rank 0 在 head 节点、rank 15 在 worker 节点。
+    - 跨节点通道是 `via NET/Libfabric/<n>/GDRDMA`，即 GPUDirect RDMA。
+  - 缩容：13:21:01 释放 RayJob，13:21:02 节点组缩到 0，13:22:35 两台实例进入 shutting-down。从训练结束到关机约 1.5 分钟，上次是约 10 分钟。
 - 2026-10-05 清理：rl-dev（us-east-1）第一次删除时 VPC 被平台自建的 sg-acr/sg-nlb 卡住。修复后先删 SG（等待 AgentCore 释放隐藏 ENI），再删栈，最终状态为 `deleted`，VPC 已不存在。
 
 ## Out of Scope
