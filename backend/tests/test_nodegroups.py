@@ -479,3 +479,89 @@ def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkey
     assert ctx.context["runtimes_deleted"] == {"rt-1": True}  # a retry skips it
     with session_scope() as s:
         assert s.get(AgentRuntime, "rt-1").status == "deleted"
+
+
+def test_cluster_delete_removes_platform_sgs_before_the_stack(stub_aws, monkeypatch):
+    """sg-acr / sg-nlb sit in the stack's VPC: deleting them only after the stack left the
+    VPC undeletable (DELETE_FAILED). In-use SGs are retried once the stack is gone."""
+    from botocore.exceptions import ClientError
+
+    from app.pipelines import cluster as pc
+
+    _cluster(cfn_stack="tuningpad-dev")
+    with session_scope() as s:
+        s.get(Cluster, "cl-1").network = {"cluster_sgs": [], "sg_acr": "sg-a", "sg_nlb": "sg-n"}
+    order: list[str] = []
+    in_use = {"sg-n": 1}  # busy on the first attempt only
+
+    def delete_sg(GroupId):
+        order.append(f"sg:{GroupId}")
+        if in_use.get(GroupId):
+            in_use[GroupId] -= 1
+            raise ClientError({"Error": {"Code": "DependencyViolation"}}, "DeleteSecurityGroup")
+        return {}
+
+    stack = {"alive": True}
+
+    def delete_stack(StackName):
+        order.append("stack")
+        stack["alive"] = False
+        return {}
+
+    stub_aws(
+        {
+            "ec2": StubClient(delete_security_group=delete_sg),
+            "cloudformation": StubClient(delete_stack=delete_stack),
+        }
+    )
+    monkeypatch.setattr(
+        pc.hp,
+        "stack_status",
+        lambda r, n: {"status": "DELETE_IN_PROGRESS"} if stack["alive"] else None,
+    )
+
+    class Ctx:
+        target_id = "cl-1"
+
+        def log(self, m):
+            pass
+
+        def detail(self, m):
+            pass
+
+        def sleep(self, s):
+            pass
+
+        def wait_until(self, fn, **kw):
+            while not fn():
+                pass
+
+    # sg-n busy once: retried (wait loop) before the stack delete is issued
+    pc.stage_delete_cluster(Ctx())
+    assert order == ["sg:sg-a", "sg:sg-n", "sg:sg-n", "stack"]
+
+
+def test_stack_failure_reason_ignores_earlier_operations(stub_aws):
+    from app.services import hyperpod as hp
+
+    sid = "arn:stack/x"
+
+    def ev(lid, status, reason="", rtype="AWS::EC2::VPC", phys="p"):
+        return {
+            "LogicalResourceId": lid,
+            "ResourceStatus": status,
+            "ResourceStatusReason": reason,
+            "ResourceType": rtype,
+            "PhysicalResourceId": phys,
+            "StackId": sid,
+        }
+
+    stack = {"rtype": "AWS::CloudFormation::Stack", "phys": sid}
+    events = [  # newest first: 2nd delete failed on VPC; 1st on a subnet
+        ev("VPCStack", "DELETE_FAILED", "VPC failed"),
+        ev("x", "DELETE_IN_PROGRESS", **stack),
+        ev("PrivateSubnetStack", "DELETE_FAILED", "subnet failed"),
+        ev("x", "DELETE_IN_PROGRESS", **stack),
+    ]
+    stub_aws({"cloudformation": StubClient(describe_stack_events={"StackEvents": events})})
+    assert hp.stack_failure_reason("us-east-1", "x") == "VPCStack: VPC failed"

@@ -39,7 +39,7 @@
 - D1 MVP 范围：预置模板加用户自带 agent。用户可以上传代码 zip（含 Dockerfile），也可以提供已有的 ECR 镜像。训练前必须通过契约校验和 ACR 冒烟测试。reward 在 agent 镜像内计算。
 - D3 部署形态：单机单用户。使用本机 AWS 凭证，口令登录，SQLite 存储，保留 `workspace_id`。
 - D4 后端：只支持 verl，模板和契约层做成后端无关的抽象。
-- D6 模板：GSM8K Math 和 OfficeBench。需要通用化：多模型、多机型、分布式。机型**只考虑 P 系列**：p4d/p4de.24xlarge、p5/p5e/p5en.48xlarge、p6-b200/b300.48xlarge。
+- D6 模板：GSM8K Math 和 OfficeBench。需要通用化：多模型、多机型、分布式。训练机型**只考虑 P 系列**：p4d/p4de.24xlarge、p5/p5e/p5en.48xlarge、p6-b200/b300.48xlarge。（2026-10-05 修订）推理另外允许 G 系列（g5/g6/g6e），只能用于 EC2 节点组上的 vLLM，不进入训练、规划器和 HyperPod 实例组。
 - D8（用户 2026-10-04）：**训练算力从自管 EC2 改为 SageMaker HyperPod（EKS 编排）**，新增 **EKS/HyperPod 集群管理**模块。**模型合并导出和推理部署也在这个集群上运行**。不再保留 EC2 训练路径。
 - D9（技术决定，依据调研）：
   - 集群创建：支持两种方式。新建时调用官方 HyperPod EKS CloudFormation 栈（VPC、EKS、FSx、IAM、HyperPod，以及 system 实例组）；也可以导入已有的 EKS 加 HyperPod 集群。之后由平台通过 SageMaker API 管理实例组（增删、扩缩、training plan），通过 helm 或 k8s client 安装平台组件：KubeRay、AWS LBC、FSx PVC、命名空间、S3 访问身份。
@@ -54,6 +54,8 @@
   - 导出：用 k8s Job 跑 `verl.model_merger`，产出 HF safetensors 写到 FSx，再上传到 S3。
   - 推理：使用 vLLM Deployment，配合 internal NLB 和 `--api-key`，部署在推理实例组或者训练实例组空闲时的节点上。评估使用 `RolloutClient.run_batch` 加 ACR，指向这个推理 endpoint。
   - 默认区域为 us-east-1（只有这里有配额）。ACR、桶、ECR 镜像都按集群所在区域部署。
+
+- D10（2026-10-04）：ACR 部署使用 `platformVersion`，默认 `auto`：在支持的区域（us-east-1/2、us-west-2、eu-west-1、ap-northeast-1）用 Runtime V2（快照启动），其他区域回退 V1；也可以通过 `agent_platform_version` 或在部署时显式选择。V2 的 create/update 要几分钟才 READY，部署前需等待 runtime 离开进行中状态。
 
 ## Requirements
 
@@ -104,7 +106,7 @@
 
 ## Acceptance Criteria
 
-- [ ] `make verify` 全部通过：backend ruff 加 pytest（hermetic）、frontend eslint、tsc、build、i18n key 一致性检查。
+- [x] `make verify` 全部通过：backend ruff 加 pytest（hermetic）、frontend eslint、tsc、build、i18n key 一致性检查。
 - [ ] `./start.py` 启动后，UI 为 launchpad V2 风格，可以切换中英文，未登录访问会被拦截。
 - [ ] 单元测试覆盖以下内容：
   - 渲染器：RayJob、vLLM Deployment/Service、merge Job、ACR VPC 配置、agentcore_agent.yaml、CFN 参数，覆盖 FSDP/Megatron 和单/多节点组合，关键参数要与仓库中已验证的脚本一致。
@@ -119,11 +121,29 @@
   - 能查询 training plan 报价。
   - 新建集群的 CFN 模板参数通过 validate-template。
 - [ ] 上传不符合契约的数据集或镜像时，UI 显示具体错误，而不是 500。
-- [ ] 需要用户批准费用，单独执行：
-  - (a) 创建 HyperPod EKS 集群，只含 system 实例组（CPU，低成本），安装平台组件；在集群 VPC 中部署 GSM8K 模板 agent（VPC 模式）并通过冒烟。
-  - (b) 1×p5（或 p4d）实例组扩容，跑 2 步的 GSM8K 冒烟训练：曲线有数据点，checkpoint 写入 FSx；导出 HF 模型到 S3；部署 vLLM 推理；对 base 和训练后的模型各跑一次小规模评估；最后缩容到 0。
-  - (c) 可选，另行批准：2 节点 EFA 冒烟训练。
+- [ ] 需要用户批准费用，单独执行（(a)(b) 已完成；(c) 训练已跑通，EFA 传输还需日志确认）：
+  - [x] (a) 创建 HyperPod EKS 集群，只含 system 实例组（CPU，低成本），安装平台组件；在集群 VPC 中部署 GSM8K 模板 agent（VPC 模式）并通过冒烟。
+  - [x] (b) 1×p5（或 p4d）实例组扩容，跑 2 步的 GSM8K 冒烟训练：曲线有数据点，checkpoint 写入 FSx；导出 HF 模型到 S3；部署 vLLM 推理；对 base 和训练后的模型各跑一次小规模评估；最后缩容到 0。
+  - [ ] (c) 可选，另行批准：2 节点 EFA 冒烟训练。
 - [ ] 资源页能列出测试过程中产生的资源，并可以清理（包括删除集群）。
+
+## 验证记录
+
+只记录有真实运行证据的项，其余复选框尚未逐项核实。
+
+- 2026-10-04 (a)：us-east-2 新建 rl-dev-2（CFN 栈 → 组件全部安装）。安装中途后端重启，helm release 卡在 pending-install，已修复为自动清理后重试。GSM8K agent 以 VPC 模式和 Runtime V2 部署（`get_agent_runtime` 返回 `platformVersion=V2`），冒烟 2/2。
+- 2026-10-04 (b)：使用 1×p5.48xlarge Spot 的 EKS 托管节点组，而不是 HyperPod 实例组。Qwen3.5-2B fsdp_full 训练 2 步，reward 从 0.21 到 0.56，checkpoint 写入 FSx，跑完自动缩到 0（drain 用了约 10 分钟）。
+- 2026-10-05 (b)：export 在 system 节点上合并出 4.4 GB HF 模型，同步到 S3（修复了 CPU 节点上的 NVML 报错）。vLLM 部署在 g5.2xlarge 上，走 internal NLB。50 条 val 评测（单轮 1024 token，temperature 0.6）结果如下：
+  - base：mean reward 0.50，失败率 12%。
+  - 训练第 2 步：mean reward 0.36，失败率 52%，失败原因都是单轮超过 max_tokens 被截断。
+  - 训练后的模型反而变差，原因待查。
+  - 评测结束后端点已删除，节点组已缩到 0。
+- 2026-10-05 (c)：2×p5.48xlarge Spot 训练，使用 EFA 节点组 `ec2-p5-efa`（use2-az3，cluster placement group，每台 33 个 ENI）。
+  - 2 步训练成功：world 16，reward 从 0.25 到 0.72，checkpoint 写入 FSx，GPU 费用约 $14。
+  - 两个 Pod 都看到了 32 个 EFA 设备，`fi_info -p efa` 正常，aws-ofi-nccl 插件存在，`FI_PROVIDER=efa`。
+  - **还没有日志证据证明 NCCL 实际走的是 EFA**：当时 `NCCL_DEBUG=WARN`，容器内也读不到 EFA 硬件计数器。现已在多节点下改为 `NCCL_DEBUG=INFO`，`NCCL_DEBUG_SUBSYS=INIT,NET`，下次多节点训练时确认。
+  - 训练结束后 RayCluster 仍按 TTL 保留 600 秒，导致节点 drain 时 GPU 多计费约 10 分钟。已改为训练结束时立即删除 RayJob。
+- 2026-10-05 清理：rl-dev（us-east-1）第一次删除时 VPC 被平台自建的 sg-acr/sg-nlb 卡住。修复后先删 SG（等待 AgentCore 释放隐藏 ENI），再删栈，最终状态为 `deleted`，VPC 已不存在。
 
 ## Out of Scope
 
@@ -134,5 +154,5 @@
 - HyperPod Inference Operator / SageMaker endpoint 托管推理，作为后续选项
 - Managed Tiered Checkpointing
 - GB200 UltraServer（p6e）
-- 非 P 系列 GPU 机型
+- 非 P 系列 GPU 机型用于训练（G 系列仅用于推理，见 D6）
 - 推理服务对公网开放

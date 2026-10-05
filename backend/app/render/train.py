@@ -372,6 +372,10 @@ def pod_env(
                 "FI_EFA_USE_DEVICE_RDMA": "1",
                 "FI_EFA_FORK_SAFE": "1",
                 "NCCL_SOCKET_IFNAME": "^docker,lo,veth",
+                # INIT,NET only: the train log then records the chosen transport
+                # ("NET/OFI Selected provider is efa"), the evidence that EFA is in use
+                "NCCL_DEBUG": "INFO",
+                "NCCL_DEBUG_SUBSYS": "INIT,NET",
             }
         )
     return [{"name": k, "value": v} for k, v in env.items()]

@@ -21,6 +21,8 @@ from ..services import hyperpod as hp
 from ..services import project as proj
 
 CFN_TIMEOUT_S = 2 * 3600
+# AgentCore keeps hidden ENIs on sg-acr for a while after its VPC runtimes are deleted
+SG_RELEASE_TIMEOUT_S = 3600
 COMPONENTS = [
     "access",
     "reach",
@@ -676,6 +678,26 @@ def stage_delete_cluster(ctx: StageContext) -> None:
                         ec2.revoke_security_group_ingress(GroupId=csg, IpPermissions=drop)
             except Exception as e:
                 ctx.log(f"revoke rules from cluster SG failed: {e}")
+    # sg-acr / sg-nlb live in the stack's VPC but are not stack resources: delete them
+    # before the stack, or VPC deletion fails (DELETE_FAILED on VPC). AgentCore releases
+    # its hidden ENIs on sg-acr some minutes after the runtime is gone, so keep retrying
+    # (DependencyViolation) before giving the stack a go; leftovers are retried after it.
+    leftover = _delete_platform_sgs(ctx, ec2, c)
+    if leftover:
+        state = {"left": leftover}
+
+        def sgs_deleted():
+            state["left"] = _delete_platform_sgs(ctx, ec2, c, only=state["left"])
+            ctx.detail(f"waiting for {', '.join(state['left'])} to be released")
+            return not state["left"]
+
+        try:
+            ctx.wait_until(
+                sgs_deleted, timeout_s=SG_RELEASE_TIMEOUT_S, interval_s=30, what="SG release"
+            )
+        except AppError as e:
+            ctx.log(f"security groups still in use, deleting the stack anyway: {e}")
+        leftover = state["left"]
     if c["cfn_stack"] and hp.stack_status(region, c["cfn_stack"]):
         # also re-issues the delete after a DELETE_FAILED (e.g. once blocking ENIs are gone)
         aws.client("cloudformation", region).delete_stack(StackName=c["cfn_stack"])
@@ -693,13 +715,31 @@ def stage_delete_cluster(ctx: StageContext) -> None:
             return st is None
 
         ctx.wait_until(gone, timeout_s=CFN_TIMEOUT_S, interval_s=30, what="stack deletion")
+    if leftover:
+        _delete_platform_sgs(ctx, ec2, c, only=leftover)
+
+
+def _delete_platform_sgs(
+    ctx: StageContext, ec2, c: dict, only: list[str] | None = None
+) -> list[str]:
+    """Delete TuningPad's own SGs (sg-acr, sg-nlb); return the ones still in use."""
+    from botocore.exceptions import ClientError
+
+    left = []
     for key in ("sg_acr", "sg_nlb"):
         sg = c["network"].get(key)
-        if sg:
-            try:
-                ec2.delete_security_group(GroupId=sg)
-            except Exception as e:
-                ctx.log(f"delete {sg}: {e}")
+        if not sg or (only is not None and sg not in only):
+            continue
+        try:
+            ec2.delete_security_group(GroupId=sg)
+            ctx.log(f"deleted security group {sg}")
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code == "InvalidGroup.NotFound":
+                continue
+            ctx.log(f"delete {sg}: {code}")
+            left.append(sg)
+    return left
 
 
 def _on_deleted(target: str, status: str, error: str | None) -> None:

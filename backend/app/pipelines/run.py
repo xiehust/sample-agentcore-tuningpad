@@ -391,8 +391,24 @@ def stage_finalize(ctx: StageContext) -> None:
     prog = _ingest_metrics(run, c["region"], bucket)
     prog["ckpt_steps"] = svc.ckpt_steps(c["region"], bucket, run["id"])
     save_run(run["id"], progress=prog, ended_at=utcnow(), **_cost(run, c["region"]))
+    _release_rayjob(c, run, ctx.log)
     if run["compute"].get("scale_down_after"):
         scale_down_if_idle(c, run["compute"]["instance_group"], ctx.log, _provider(run))
+
+
+def _release_rayjob(c: dict[str, Any], run: dict[str, Any], log) -> None:
+    """Delete the finished RayJob now. KubeRay otherwise keeps its RayCluster for
+    ttlSecondsAfterFinished (600 s): the node group drain then waits on those pods, and the
+    operator re-creates evicted workers, so GPU nodes bill ~10 more minutes. Logs and
+    metrics are already in S3 / the DB, checkpoints on FSx."""
+    name = run.get("rayjob_name")
+    if not name or not c.get("eks_name"):
+        return
+    try:
+        kube.delete(c["region"], c["eks_name"], svc.RAYJOB_API, "RayJob", name)
+        log(f"released RayJob {name}")
+    except Exception as e:  # ttlSecondsAfterFinished is the backstop
+        log(f"RayJob {name} cleanup skipped: {e}")
 
 
 def scale_down_if_idle(c: dict[str, Any], group: str, log, provider: str = pools.HYPERPOD) -> None:
@@ -434,8 +450,11 @@ def _finished(target: str, status: str, error: str | None) -> None:
     if status != "succeeded" and run["compute"].get("scale_down_after"):
         # never leave a pending scale-up behind (e.g. Spot fulfilled after we gave up)
         try:
+            c = pc.load(run["cluster_id"])
+            if status != "cancelled":  # stop already deleted it; failed runs keep nothing
+                _release_rayjob(c, run, lambda m: None)
             scale_down_if_idle(
-                pc.load(run["cluster_id"]),
+                c,
                 run["compute"]["instance_group"],
                 lambda m: None,
                 _provider(run),

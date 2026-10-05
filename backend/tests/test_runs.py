@@ -165,6 +165,12 @@ def test_rayjob_single_and_multi_node():
         "VERL_USE_EXTERNAL_MODULES",
         "FI_PROVIDER",
     } <= names
+    envd = {e["name"]: e["value"] for e in env}
+    assert envd["NCCL_DEBUG"] == "INFO" and envd["NCCL_DEBUG_SUBSYS"] == "INIT,NET"
+    single = rt.pod_env(
+        run_id="r", region="us-east-1", bucket="b", runtime_arn="arn", multi_node=False, spec=spec
+    )
+    assert {e["name"]: e["value"] for e in single}["NCCL_DEBUG"] == "WARN"
     one = rt.rayjob(
         run_id="r",
         name="r-a0",
@@ -385,6 +391,9 @@ def test_run_happy_path(run_env):
     assert vals[(2, "val-core/unknown/reward/mean@1")] == 0.6
     cm = run_env["applied"][0]
     assert "require_registered_sessions: true" in cm["data"]["agentcore_agent.yaml"]
+    # the finished RayJob is released right away (no 600 s TTL holding GPU nodes)
+    rayjob = run_env["applied"][1]["metadata"]["name"]
+    assert run_env["deleted"] == [rayjob]
 
 
 def test_run_retries_then_fails(run_env):

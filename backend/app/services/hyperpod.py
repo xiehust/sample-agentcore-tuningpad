@@ -111,12 +111,24 @@ def stack_status(region: str, name: str) -> dict[str, Any] | None:
 
 
 def stack_failure_reason(region: str, name: str) -> str | None:
-    """First CREATE_FAILED event (nested stacks report the real cause there)."""
+    """Earliest *_FAILED event of the latest operation on the stack (nested stacks report
+    the real cause there). Older operations are skipped: after a re-issued delete, the
+    first attempt's failure is stale."""
     cfn = aws.client("cloudformation", region)
     try:
-        events = cfn.describe_stack_events(StackName=name)["StackEvents"]
+        events = cfn.describe_stack_events(StackName=name)["StackEvents"]  # newest first
     except ClientError:
         return None
+    for i, e in enumerate(events):
+        if (
+            e.get("ResourceType") == "AWS::CloudFormation::Stack"
+            and e.get("PhysicalResourceId") == e.get("StackId")
+            and e.get("ResourceStatus", "").endswith("_IN_PROGRESS")
+            and "CLEANUP" not in e.get("ResourceStatus", "")
+            and "ROLLBACK" not in e.get("ResourceStatus", "")
+        ):
+            events = events[:i]  # events of the latest operation
+            break
     failed = [e for e in events if e.get("ResourceStatus", "").endswith("FAILED")]
     if not failed:
         return None
