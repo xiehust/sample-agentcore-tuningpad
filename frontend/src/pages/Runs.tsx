@@ -300,7 +300,7 @@ function RunWizard() {
                 <Select
                   value={compute.instance_type}
                   onChange={(v) => setCompute({ ...compute, instance_type: v, instance_group: groupName(v, compute.capacity, compute.provider) })}
-                  options={(instances.data?.instances ?? []).map((i) => ({
+                  options={(instances.data?.instances ?? []).filter((i) => i.training).map((i) => ({
                     value: i.type,
                     label: ec2
                       ? `${i.type} · ${i.gpus}×${i.gpu} · EC2 ${money(i.ec2_price_per_hour)}/h`

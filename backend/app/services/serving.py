@@ -68,6 +68,10 @@ def merge_job(
                             "env": [
                                 {"name": "AWS_REGION", "value": region},
                                 {"name": "AWS_DEFAULT_REGION", "value": region},
+                                # the merge is CPU-only; the CUDA base image sets
+                                # NVIDIA_VISIBLE_DEVICES=all, which makes the NVIDIA runtime
+                                # fail the container on a GPU-less node (system group)
+                                {"name": "NVIDIA_VISIBLE_DEVICES", "value": "void"},
                             ],
                             "resources": {"requests": {"cpu": "2", "memory": f"{mem_gib}Gi"}},
                             "volumeMounts": [{"name": "fsx", "mountPath": FSX_MOUNT}],
@@ -112,11 +116,13 @@ def vllm_manifests(
     max_model_len: int | None,
     node_selector: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    spec = instances.spec(instance_type)
+    spec = instances.spec(instance_type, serving=True)
     if tp > spec.gpus:
         from ..core.errors import AppError
 
         raise AppError("inference.tp_too_large", f"TP {tp} > {spec.gpus} GPUs per node")
+    # /dev/shm is RAM: keep it a quarter of a small node (g5.2xlarge has 32 GiB in total)
+    shm_gib = max(1, min(32, spec.mem_gib // 4))
     name = endpoint_name(endpoint_id)
     args = [
         "--model",
@@ -183,7 +189,10 @@ def vllm_manifests(
                     ],
                     "volumes": [
                         {"name": "fsx", "persistentVolumeClaim": {"claimName": "fsx"}},
-                        {"name": "dshm", "emptyDir": {"medium": "Memory", "sizeLimit": "32Gi"}},
+                        {
+                            "name": "dshm",
+                            "emptyDir": {"medium": "Memory", "sizeLimit": f"{shm_gib}Gi"},
+                        },
                     ],
                 },
             },
@@ -212,6 +221,32 @@ def vllm_manifests(
         },
     }
     return [deployment, service]
+
+
+SAMPLING_KEYS = ("max_tokens", "temperature", "top_p", "top_k")
+
+
+def eval_sampling(
+    template_loop: dict[str, Any] | None,
+    run_params: dict[str, Any] | None,
+    override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Per-turn sampling for an eval, matching the training run's validation rollouts:
+    `max_tokens` = the agent loop's max_tokens_per_turn, `temperature` = val_temperature.
+    Without it every agent turn may generate up to max_model_len (vLLM's default)."""
+    from ..render.train import merge_params
+
+    p = merge_params(run_params or {})
+    out: dict[str, Any] = {
+        "max_tokens": int(
+            p.get("max_tokens_per_turn") or (template_loop or {}).get("max_tokens_per_turn", 1024)
+        ),
+        "temperature": float(p["val_temperature"]),
+    }
+    for k, v in (override or {}).items():
+        if k in SAMPLING_KEYS and v is not None:
+            out[k] = v
+    return out
 
 
 def secret_manifest(endpoint_id: str, key: str) -> dict[str, Any]:

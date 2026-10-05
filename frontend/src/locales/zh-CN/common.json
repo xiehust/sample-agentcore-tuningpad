@@ -752,6 +752,7 @@
     "confirmSpot": "以 EC2 Spot 启动 {{count}} × {{type}}？实例运行即开始计费；空闲的节点组会被 guardian 缩到 0。",
     "scaleTitle": "扩缩节点组 {{name}}",
     "deleteTitle": "删除节点组",
-    "deleteBody": "删除 EC2 节点组 {{name}}？其节点会被终止。"
+    "deleteBody": "删除 EC2 节点组 {{name}}？其节点会被终止。",
+    "inferenceOnly": "仅推理"
   }
 }

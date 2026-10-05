@@ -1,4 +1,5 @@
-"""P-family instance catalog for HyperPod instance groups.
+"""Instance catalog: P-family for training (HyperPod groups or EC2 node groups) plus
+inference-only G-family types that EC2 node groups may use for vLLM endpoints.
 
 Static specs were read from `ec2 describe-instance-types` (us-east-1, 2026-10-04);
 p5e is absent from that API in us-east-1 and comes from the EC2 accelerated
@@ -24,7 +25,8 @@ class InstanceSpec:
     vcpus: int
     mem_gib: int
     efa: int  # max EFA interfaces = vpc.amazonaws.com/efa resource per node
-    arch: str  # ampere | hopper | blackwell
+    arch: str  # ampere | ada | hopper | blackwell
+    training: bool = True  # False: vLLM serving on an EC2 node group only
 
     @property
     def ml_type(self) -> str:
@@ -46,6 +48,22 @@ CATALOG: dict[str, InstanceSpec] = {
         InstanceSpec("p5en.48xlarge", "H200", 8, 141, 192, 2048, 16, "hopper"),
         InstanceSpec("p6-b200.48xlarge", "B200", 8, 179, 192, 2048, 8, "blackwell"),
         InstanceSpec("p6-b300.48xlarge", "B300", 8, 268, 192, 4096, 16, "blackwell"),
+    ]
+}
+
+# Inference-only (ec2 describe-instance-types, us-east-2, 2026-10-05). GPU memory is the
+# usable MiB reported by EC2, rounded down. Never offered for HyperPod groups or training.
+SERVING_CATALOG: dict[str, InstanceSpec] = {
+    s.type: s
+    for s in [
+        InstanceSpec("g5.xlarge", "A10G", 1, 22, 4, 16, 0, "ampere", training=False),
+        InstanceSpec("g5.2xlarge", "A10G", 1, 22, 8, 32, 0, "ampere", training=False),
+        InstanceSpec("g5.4xlarge", "A10G", 1, 22, 16, 64, 0, "ampere", training=False),
+        InstanceSpec("g5.12xlarge", "A10G", 4, 22, 48, 192, 0, "ampere", training=False),
+        InstanceSpec("g6.2xlarge", "L4", 1, 22, 8, 32, 0, "ada", training=False),
+        InstanceSpec("g6e.xlarge", "L40S", 1, 44, 4, 32, 0, "ada", training=False),
+        InstanceSpec("g6e.2xlarge", "L40S", 1, 44, 8, 64, 0, "ada", training=False),
+        InstanceSpec("g6e.12xlarge", "L40S", 4, 44, 48, 384, 0, "ada", training=False),
     ]
 }
 
@@ -84,17 +102,21 @@ def clear_cache() -> None:
         _cache.clear()
 
 
-def spec(instance_type: str) -> InstanceSpec:
+def spec(instance_type: str, *, serving: bool = False) -> InstanceSpec:
+    """Training-capable (P-family) spec; `serving=True` also accepts inference-only types."""
     t = instance_type.removeprefix("ml.")
-    if t not in CATALOG:
-        from ..core.errors import AppError
+    if t in CATALOG:
+        return CATALOG[t]
+    if serving and t in SERVING_CATALOG:
+        return SERVING_CATALOG[t]
+    from ..core.errors import AppError
 
-        raise AppError(
-            "catalog.unsupported_instance",
-            f"{instance_type} is not a supported P-family instance type",
-            detail={"supported": sorted(CATALOG)},
-        )
-    return CATALOG[t]
+    allowed = sorted(CATALOG) + (sorted(SERVING_CATALOG) if serving else [])
+    raise AppError(
+        "catalog.unsupported_instance",
+        f"{instance_type} is not a supported instance type here",
+        detail={"supported": allowed},
+    )
 
 
 def on_demand_price(region: str, instance_type: str) -> float | None:
@@ -188,13 +210,16 @@ def ec2_spot_price(region: str, instance_type: str) -> float | None:
 
 
 EC2_QUOTAS = {"on_demand": "L-417A185B", "spot": "L-7212CCBC"}  # P-family vCPUs
+EC2_G_QUOTAS = {"on_demand": "L-DB2E81BA", "spot": "L-3819A6DF"}  # G and VT vCPUs
 
 
-def ec2_quotas(region: str) -> dict[str, float | None]:
+def ec2_quotas(region: str, family: str = "p") -> dict[str, float | None]:
+    codes = EC2_G_QUOTAS if family == "g" else EC2_QUOTAS
+
     def load():
         sq = aws.client("service-quotas", region)
         out: dict[str, float | None] = {}
-        for k, code in EC2_QUOTAS.items():
+        for k, code in codes.items():
             try:
                 out[k] = float(
                     sq.get_service_quota(ServiceCode="ec2", QuotaCode=code)["Quota"]["Value"]
@@ -203,7 +228,7 @@ def ec2_quotas(region: str) -> dict[str, float | None]:
                 out[k] = None
         return out
 
-    return _cached(f"ec2quotas:{region}", load)
+    return _cached(f"ec2quotas:{family}:{region}", load)
 
 
 def cluster_quotas(region: str) -> dict[str, float]:
@@ -246,13 +271,14 @@ def catalog_view(region: str, *, live: bool = True) -> dict:
         except Exception as e:  # quota visibility is advisory
             errors.append(f"quotas: {type(e).__name__}: {e}")
     rows = []
-    for s in CATALOG.values():
+    for s in [*CATALOG.values(), *SERVING_CATALOG.values()]:
         price = ec2_price = None
         if live:
-            try:
-                price = on_demand_price(region, s.type)
-            except Exception as e:
-                errors.append(f"price {s.type}: {type(e).__name__}")
+            if s.training:  # HyperPod (ml.*) price; serving types run on EC2 only
+                try:
+                    price = on_demand_price(region, s.type)
+                except Exception as e:
+                    errors.append(f"price {s.type}: {type(e).__name__}")
             try:
                 ec2_price = ec2_on_demand_price(region, s.type)
             except Exception as e:
@@ -276,11 +302,14 @@ def catalog_view(region: str, *, live: bool = True) -> dict:
             "Total number of Spot instances allowed across SageMaker HyperPod clusters"
         ),
     }
-    ec2 = {}
+    ec2: dict = {}
+    ec2_g: dict = {}
     if live:
         try:
             ec2 = ec2_quotas(region)
+            ec2_g = ec2_quotas(region, "g")
         except Exception as e:
             errors.append(f"ec2 quotas: {type(e).__name__}")
     limits["ec2_p_vcpus"] = ec2
+    limits["ec2_g_vcpus"] = ec2_g
     return {"region": region, "instances": rows, "limits": limits, "errors": errors}

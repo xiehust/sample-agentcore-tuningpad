@@ -140,6 +140,8 @@ class EvalBody(BaseModel):
     dataset_id: str
     split: str = "val"
     limit: int = Field(200, ge=1, le=20000)
+    # per-turn overrides (max_tokens, temperature, top_p, top_k); default: the run's val settings
+    sampling_params: dict[str, float | int] | None = None
 
 
 @evals.post("")
@@ -159,4 +161,5 @@ def create_eval(body: EvalBody):
                 summary={},
             )
         )
-    return {"id": eid, "job_id": get_engine().start("eval.run", eid, {})}
+    payload = {"sampling_params": body.sampling_params} if body.sampling_params else {}
+    return {"id": eid, "job_id": get_engine().start("eval.run", eid, payload)}

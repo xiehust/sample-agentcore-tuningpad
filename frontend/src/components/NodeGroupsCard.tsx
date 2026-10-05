@@ -121,7 +121,7 @@ function NodeGroupForm({
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const row = instances.data?.instances.find((i) => i.type === itype);
-  const vcpu = instances.data?.limits.ec2_p_vcpus?.[capacity];
+  const vcpu = (row && !row.training ? instances.data?.limits.ec2_g_vcpus : instances.data?.limits.ec2_p_vcpus)?.[capacity];
   const price = initial ? (initial.price_per_hour ?? 0) : capacity === "on_demand" ? (row?.ec2_price_per_hour ?? 0) : 0;
   const hourly = price * count;
 
@@ -167,7 +167,7 @@ function NodeGroupForm({
               onChange={setItype}
               options={(instances.data?.instances ?? []).map((i) => ({
                 value: i.type,
-                label: `${i.type} · ${i.gpus}×${i.gpu} · ${t("nodegroups.odPrice", { price: money(i.ec2_price_per_hour) })}`,
+                label: `${i.type} · ${i.gpus}×${i.gpu} · ${t("nodegroups.odPrice", { price: money(i.ec2_price_per_hour) })}${i.training ? "" : ` · ${t("nodegroups.inferenceOnly")}`}`,
               }))}
             />
           </Field>

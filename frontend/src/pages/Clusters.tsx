@@ -380,7 +380,7 @@ function GroupForm({ cluster, initial, onClose, onStarted }: {
               value={itype}
               disabled={!!initial}
               onChange={setItype}
-              options={(instances.data?.instances ?? []).map((i) => ({
+              options={(instances.data?.instances ?? []).filter((i) => i.training).map((i) => ({
                 value: i.type,
                 label: `${i.ml_type} · ${i.gpus}×${i.gpu} · ${money(i.price_per_hour)}/h · quota ${num(i.quota.on_demand, 0)}`,
               }))}

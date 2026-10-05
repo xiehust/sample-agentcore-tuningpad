@@ -176,6 +176,8 @@ export interface InstanceRow {
   efa: number;
   arch: string;
   multi_node: boolean;
+  /** false: inference-only type (vLLM on an EC2 node group) */
+  training: boolean;
   price_per_hour: number | null;
   ec2_price_per_hour: number | null;
   quota: { on_demand: number | null; spot: number | null };
@@ -189,6 +191,7 @@ export interface InstanceCatalog {
     total: number | null;
     spot_total: number | null;
     ec2_p_vcpus?: { on_demand?: number | null; spot?: number | null };
+    ec2_g_vcpus?: { on_demand?: number | null; spot?: number | null };
   };
   errors: string[];
 }

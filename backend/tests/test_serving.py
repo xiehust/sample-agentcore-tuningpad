@@ -21,6 +21,8 @@ def test_merge_job_command_and_placement():
     assert "verl.model_merger merge --backend fsdp" in script
     assert "--local_dir /fsx/runs/run-1/ckpt/global_step_10/actor" in script
     assert "s3://b/exports/ex-1/" in script
+    # CPU-only: no GPU injection on the GPU-less system node
+    assert {"name": "NVIDIA_VISIBLE_DEVICES", "value": "void"} in c["env"]
     assert (
         j["spec"]["template"]["spec"]["nodeSelector"]["sagemaker.amazonaws.com/instance-group-name"]
         == "system"
@@ -90,3 +92,21 @@ def test_summarize_eval_counts_failures_as_zero():
     assert s["n"] == 4 and s["scored"] == 3 and s["failed"] == 1
     assert s["mean_reward"] == 0.5 and s["mean_reward_scored"] == pytest.approx(0.6667, abs=1e-3)
     assert s["acr_failed_rate"] == 0.25
+
+
+def test_eval_sampling_matches_training_validation():
+    # template default per-turn budget + run's val temperature
+    s = svc.eval_sampling({"max_tokens_per_turn": 1024}, {"val_temperature": 0.3})
+    assert s == {"max_tokens": 1024, "temperature": 0.3}
+    # a run-level max_tokens_per_turn wins over the template
+    assert (
+        svc.eval_sampling({"max_tokens_per_turn": 1024}, {"max_tokens_per_turn": 2048})[
+            "max_tokens"
+        ]
+        == 2048
+    )
+    # no template, no run (HF endpoint): toolkit default 1024, verl val default 0.6
+    assert svc.eval_sampling(None, None) == {"max_tokens": 1024, "temperature": 0.6}
+    # explicit overrides; unknown keys ignored
+    s = svc.eval_sampling(None, None, {"temperature": 0.0, "top_p": 0.95, "seed": 1})
+    assert s == {"max_tokens": 1024, "temperature": 0.0, "top_p": 0.95}

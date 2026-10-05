@@ -92,7 +92,7 @@ def delete_node_role(region: str, cluster_name: str) -> None:
 def launch_template_data(
     instance_type: str, security_groups: list[str], efa: bool, placement_group: str | None
 ) -> dict[str, Any]:
-    spec = instances.spec(instance_type)
+    spec = instances.spec(instance_type, serving=True)
     data: dict[str, Any] = {
         "BlockDeviceMappings": [
             {
@@ -248,7 +248,7 @@ def create(
     az_id: str | None = None,
 ) -> dict[str, Any]:
     validate_name(name)
-    spec = instances.spec(instance_type)
+    spec = instances.spec(instance_type, serving=True)
     if capacity not in ("on_demand", "spot"):
         raise AppError("nodegroup.bad_capacity", "EC2 node groups use on_demand or spot")
     if efa and not spec.multi_node:

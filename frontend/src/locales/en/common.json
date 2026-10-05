@@ -752,6 +752,7 @@
     "confirmSpot": "Launch {{count}} × {{type}} on EC2 Spot? Billing starts when the instances run; the guardian scales idle node groups to 0.",
     "scaleTitle": "Scale node group {{name}}",
     "deleteTitle": "Delete node group",
-    "deleteBody": "Delete EC2 node group {{name}}? Its nodes are terminated."
+    "deleteBody": "Delete EC2 node group {{name}}? Its nodes are terminated.",
+    "inferenceOnly": "inference only"
   }
 }

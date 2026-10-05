@@ -48,7 +48,7 @@ function ModelsTab() {
             <Select
               value={itype}
               onChange={setItype}
-              options={(instances.data?.instances ?? []).map((i) => ({ value: i.type, label: `${i.type} · ${i.gpus}×${i.gpu} ${i.gpu_mem_gib}G` }))}
+              options={(instances.data?.instances ?? []).filter((i) => i.training).map((i) => ({ value: i.type, label: `${i.type} · ${i.gpus}×${i.gpu} ${i.gpu_mem_gib}G` }))}
             />
           </Field>
           <Field label={t("models.nodes")}>
@@ -101,7 +101,7 @@ function InstancesTab() {
       {cat.data?.errors.length ? <Alert tone="warn">{cat.data.errors.join("; ")}</Alert> : null}
       <Table
         rowKey={(i) => i.type}
-        rows={cat.data?.instances ?? []}
+        rows={(cat.data?.instances ?? []).filter((i) => i.training)}
         loading={cat.loading}
         error={cat.error}
         testId="tp-instances"

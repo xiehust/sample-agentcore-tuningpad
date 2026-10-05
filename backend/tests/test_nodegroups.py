@@ -274,7 +274,10 @@ def test_nodegroup_api_confirms_cost_and_unique_names(client, stub_aws, monkeypa
     assert r.json()["detail"]["price_per_hour"] == 24.0
     r = client.post("/api/clusters/cl-1/nodegroups", json={**body, "name": "gpu-p5"})
     assert r.json()["code"] == "pool.name_taken"
+    # G-family is accepted for (inference) node groups and still needs the cost confirmation
     r = client.post("/api/clusters/cl-1/nodegroups", json={**body, "instance_type": "g5.xlarge"})
+    assert r.json()["code"] == "cluster.confirm_cost"
+    r = client.post("/api/clusters/cl-1/nodegroups", json={**body, "instance_type": "c5.xlarge"})
     assert r.json()["code"] == "catalog.unsupported_instance"
     started = []
     monkeypatch.setattr(

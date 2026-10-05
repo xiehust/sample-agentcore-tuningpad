@@ -14,7 +14,7 @@ def _clear():
     models.clear_cache()
 
 
-def test_instance_catalog_is_p_family_only():
+def test_training_catalog_is_p_family_only():
     assert all(t.startswith("p") for t in instances.CATALOG)
     assert instances.CATALOG["p5.48xlarge"].efa == 32
     assert not instances.CATALOG["p5.4xlarge"].multi_node
@@ -22,6 +22,63 @@ def test_instance_catalog_is_p_family_only():
         instances.spec("g6e.12xlarge")
     assert e.value.code == "catalog.unsupported_instance"
     assert instances.spec("ml.p5en.48xlarge").gpu == "H200"
+
+
+def test_serving_types_are_inference_only():
+    g = instances.spec("g5.2xlarge", serving=True)
+    assert (g.gpu, g.gpus, g.training, g.multi_node) == ("A10G", 1, False, False)
+    assert all(not s.training for s in instances.SERVING_CATALOG.values())
+    assert not set(instances.SERVING_CATALOG) & set(instances.CATALOG)
+    with pytest.raises(AppError):  # training paths keep rejecting G-family
+        instances.spec("g5.2xlarge")
+    view = instances.catalog_view("us-east-1", live=False)
+    rows = {r["type"]: r for r in view["instances"]}
+    assert rows["g5.2xlarge"]["training"] is False and rows["p5.48xlarge"]["training"] is True
+
+
+def test_nodegroup_launch_template_accepts_serving_type():
+    from app.services import nodegroups as ngs
+
+    data = ngs.launch_template_data("g5.2xlarge", ["sg-1"], False, None)
+    assert data["SecurityGroupIds"] == ["sg-1"]
+    assert "NetworkInterfaces" not in data
+
+
+def test_vllm_on_g5_sizes_shm_to_node_memory():
+    from app.services import serving
+
+    dep, _ = serving.vllm_manifests(
+        endpoint_id="ep-1",
+        model="/fsx/exports/ex-1",
+        served_name="m",
+        group="ec2-g5",
+        instance_type="g5.2xlarge",
+        tp=1,
+        replicas=1,
+        tool_parser=None,
+        reasoning_parser=None,
+        sg_nlb="sg-n",
+        subnets=["s1"],
+        max_model_len=8192,
+    )
+    vols = {v["name"]: v for v in dep["spec"]["template"]["spec"]["volumes"]}
+    assert vols["dshm"]["emptyDir"]["sizeLimit"] == "8Gi"
+    with pytest.raises(AppError) as e:
+        serving.vllm_manifests(
+            endpoint_id="ep-1",
+            model="m",
+            served_name="m",
+            group="g",
+            instance_type="g5.2xlarge",
+            tp=2,
+            replicas=1,
+            tool_parser=None,
+            reasoning_parser=None,
+            sg_nlb="sg",
+            subnets=[],
+            max_model_len=None,
+        )
+    assert e.value.code == "inference.tp_too_large"
 
 
 def test_catalog_view_live(stub_aws):

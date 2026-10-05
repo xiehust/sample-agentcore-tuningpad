@@ -215,6 +215,21 @@ def stage_eval(ctx: StageContext) -> None:
                 "pick a ready agent runtime deployed to the endpoint's cluster (VPC)",
             )
         runtime_arn = rt.runtime_arn
+        from ..models import Agent
+
+        agent = s.get(Agent, rt.agent_id)
+        template_id = agent.template_id if agent else None
+    template_loop = None
+    if template_id:
+        from ..templates_lib import get_template
+
+        template_loop = get_template(template_id).get("agent_loop")
+    run_params = None
+    if ep["model_source"].get("kind") == "export":
+        ex = _get(Export, ep["model_source"]["export_id"])
+        run_params = (_get(Run, ex["run_id"]).get("spec") or {}).get("params")
+    sampling = svc.eval_sampling(template_loop, run_params, ctx.payload.get("sampling_params"))
+    ctx.log(f"sampling per agent turn: {sampling}")
     c = pc.load(ep["cluster_id"])
     bucket = proj.require_region(c["region"])["bucket"]
     key = svc.read_api_key(c["region"], c["eks_name"], ep["id"])
@@ -230,6 +245,7 @@ def stage_eval(ctx: StageContext) -> None:
         model_id=ep["served_model_name"],
         api_key=key,
         tps_limit=8,
+        sampling_params=sampling,
     )
     items: list[dict[str, Any]] = []
     out_path = Path(dsvc.local_dir(ev["id"])) / "results.jsonl"

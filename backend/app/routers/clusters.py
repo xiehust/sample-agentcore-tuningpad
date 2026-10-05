@@ -299,7 +299,7 @@ def apply_nodegroup(cid: str, body: NodegroupBody):
     if existing is None:
         if not body.instance_type:
             raise AppError("cluster.instance_type_required", "instance type is required")
-        spec = instances.spec(body.instance_type)  # P-family only
+        spec = instances.spec(body.instance_type, serving=True)  # G-family: inference only
         if body.efa and not spec.multi_node:
             raise AppError("nodegroup.no_efa", f"{spec.type} has no multi-node EFA support")
         if hp.raw_group(hp.describe_cluster(c["region"], c["hyperpod_name"]), body.name):
