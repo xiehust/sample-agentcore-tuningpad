@@ -118,6 +118,63 @@ def test_param_validation():
         rt.merge_params({"max_prompt_length": 9000, "max_model_len": 4096})
 
 
+def test_run_defaults_without_runtime_or_cloud_access(client):
+    response = client.get("/api/runs/defaults")
+    assert response.status_code == 200
+    defaults = response.json()
+    assert defaults["params"] == rt.merge_params({})
+    assert defaults["agent_loop"] == {
+        "max_tokens_per_turn": 1024,
+        "tps_limit": 8,
+        "max_rollout_time": 600,
+    }
+    for key in ("lr", "gpu_memory_utilization", "total_training_steps"):
+        assert defaults["params"][key] is None
+    loop = yaml.safe_load(rt.agent_loop_yaml({}, rt.merge_params({})))[0]
+    for key, value in defaults["agent_loop"].items():
+        assert loop[key] == value
+
+
+@pytest.mark.parametrize(
+    "template_id,tokens,timeout",
+    [("gsm8k_math", 1024, 180), ("officebench", 8192, 1800)],
+)
+def test_template_defaults_match_rendered_loop(client, template_id, tokens, timeout):
+    defaults = client.get("/api/runs/defaults").json()
+    templates = client.get("/api/templates").json()
+    template = next(t for t in templates if t["id"] == template_id)
+    displayed = {k: template["agent_loop"].get(k, v) for k, v in defaults["agent_loop"].items()}
+    assert displayed == {
+        "max_tokens_per_turn": tokens,
+        "tps_limit": 8,
+        "max_rollout_time": timeout,
+    }
+    loop = yaml.safe_load(rt.agent_loop_yaml(template["agent_loop"], rt.merge_params({})))[0]
+    for key, value in displayed.items():
+        assert loop[key] == value
+
+    explicit = {"max_tokens_per_turn": 512, "tps_limit": 2, "max_rollout_time": 90}
+    loop = yaml.safe_load(rt.agent_loop_yaml(template["agent_loop"], rt.merge_params(explicit)))[0]
+    for key, value in explicit.items():
+        assert loop[key] == value
+    # Resolving overrides must not mutate the defaults returned to a fresh form.
+    assert client.get("/api/runs/defaults").json() == defaults
+
+
+def test_cleared_params_restore_defaults_and_explicit_zero_is_preserved():
+    defaults = rt.merge_params({})
+    assert rt.merge_params({k: None for k in defaults}) == defaults
+    explicit = {"temperature": 0, "val_temperature": 0, "kl_loss_coef": 0}
+    merged = rt.merge_params(explicit)
+    for key in explicit:
+        assert merged[key] == 0
+    h = _hydra(2.27, "p5.4xlarge", params=explicit)
+    assert h["actor_rollout_ref.rollout.temperature"] == "0"
+    assert h["actor_rollout_ref.rollout.val_kwargs.temperature"] == "0"
+    assert h["actor_rollout_ref.actor.kl_loss_coef"] == "0"
+    assert "trainer.total_training_steps" not in h
+
+
 def test_agent_loop_yaml_forces_registered_sessions():
     y = yaml.safe_load(
         rt.agent_loop_yaml(

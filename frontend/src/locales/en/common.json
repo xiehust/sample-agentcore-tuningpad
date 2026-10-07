@@ -453,6 +453,8 @@
     "lr_hint": "empty = planner (5e-6 full, 2e-5 LoRA)",
     "total_training_steps": "Training steps",
     "total_training_steps_hint": "empty = full epochs",
+    "runAllEpochs": "Run all epochs",
+    "templateDefaultsUnavailable": "The selected agent's template defaults are unavailable. Retry or select another agent.",
     "total_epochs": "Epochs",
     "total_epochs_hint": "",
     "max_model_len": "Max context (tokens)",

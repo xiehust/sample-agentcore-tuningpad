@@ -666,6 +666,7 @@ export interface TrainerImageView {
 }
 
 export const runApi = {
+  defaults: () => get<{ params: Record<string, unknown>; agent_loop: Record<string, number> }>("/api/runs/defaults"),
   list: () => get<RunView[]>("/api/runs"),
   get: (id: string) => get<RunView>(`/api/runs/${id}`),
   preview: (body: CreateRunBody) =>

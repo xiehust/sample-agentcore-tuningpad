@@ -453,6 +453,8 @@
     "lr_hint": "留空 = 规划器（全参 5e-6，LoRA 2e-5）",
     "total_training_steps": "训练步数",
     "total_training_steps_hint": "留空 = 跑满 epoch",
+    "runAllEpochs": "跑满轮数",
+    "templateDefaultsUnavailable": "所选 Agent 的模板默认值不可用，请重试或选择其他 Agent。",
     "total_epochs": "轮数",
     "total_epochs_hint": "",
     "max_model_len": "最大上下文（token）",

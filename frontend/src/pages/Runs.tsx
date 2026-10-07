@@ -93,9 +93,13 @@ function RunList() {
 const BASIC_KEYS = ["train_batch_size", "rollout_n", "lr", "total_training_steps", "total_epochs", "max_model_len", "max_prompt_length", "max_response_length"] as const;
 const ADVANCED_KEYS = ["kl_loss_coef", "rollout_is_threshold", "temperature", "val_temperature", "val_n", "gpu_memory_utilization", "max_tokens_per_turn", "tps_limit", "max_rollout_time", "save_freq", "test_freq", "max_actor_ckpt_to_keep"] as const;
 
-function NumField({ k, params, setParams }: { k: string; params: Record<string, unknown>; setParams: (p: Record<string, unknown>) => void }) {
+function NumField({ k, params, defaults, setParams }: { k: string; params: Record<string, unknown>; defaults: Record<string, unknown>; setParams: (p: Record<string, unknown>) => void }) {
   const { t } = useTranslation();
   const v = params[k];
+  const fallback = defaults[k];
+  const placeholder = typeof fallback === "number" ? String(fallback)
+    : k === "total_training_steps" ? t("params.runAllEpochs")
+    : k === "lr" || k === "gpu_memory_utilization" ? t("runs.auto") : "";
   return (
     <Field label={t(`params.${k}`)} hint={t(`params.${k}_hint`)}>
       <input
@@ -103,7 +107,8 @@ function NumField({ k, params, setParams }: { k: string; params: Record<string, 
         type="number"
         step="any"
         value={v === undefined || v === null ? "" : String(v)}
-        placeholder={t("runs.auto")}
+        placeholder={placeholder}
+        data-testid={`tp-run-param-${k}`}
         onChange={(e) => setParams({ ...params, [k]: e.target.value === "" ? undefined : Number(e.target.value) })}
       />
     </Field>
@@ -119,6 +124,7 @@ function RunWizard() {
   const datasets = useLoad(datasetApi.list, "datasets");
   const clusters = useLoad(clusterApi.list, "clusters");
   const templates = useLoad(agentApi.templates, "templates");
+  const defaults = useLoad(runApi.defaults, "run-defaults");
   const [step, setStep] = useState(0);
   const [name, setName] = useState(`run-${new Date().toISOString().slice(5, 16).replace(/[-:T]/g, "")}`);
   const [runtimeId, setRuntimeId] = useState("");
@@ -148,6 +154,18 @@ function RunWizard() {
   const cluster = clusters.data?.find((c) => c.id === chosen?.rt.cluster_id);
   const readyDatasets = (datasets.data ?? []).filter((d) => d.status === "ready");
   const valDs = readyDatasets.find((d) => d.id === valId);
+  const needsTemplate = !!chosen?.agent.template_id;
+  const defaultsLoading = defaults.loading || (needsTemplate && templates.loading);
+  const defaultsError = defaults.error || (needsTemplate && (
+    templates.error || (!templates.loading && !tpl ? t("params.templateDefaultsUnavailable") : null)
+  ));
+  const defaultsReady = !!defaults.data && !defaultsLoading && !defaultsError;
+  // Display inherited defaults without turning them into submitted overrides.
+  // An unresolved template is not a template-less runtime: don't show generic values.
+  const paramDefaults = { ...defaults.data?.params };
+  for (const [k, fallback] of Object.entries(defaults.data?.agent_loop ?? {})) {
+    if (!needsTemplate || tpl) paramDefaults[k] = tpl?.agent_loop[k] ?? fallback;
+  }
 
   const applyPreset = (pid: string) => {
     const p = tpl?.presets.find((x) => x.id === pid);
@@ -193,7 +211,7 @@ function RunWizard() {
     }
   };
 
-  const canNext = [!!runtimeId && !!name, !!trainId, !!modelId, !!compute.instance_type && compute.nodes > 0 && (compute.capacity !== "training_plan" || planOk), true][step];
+  const canNext = [!!runtimeId && !!name, !!trainId, !!modelId && defaultsReady, !!compute.instance_type && compute.nodes > 0 && (compute.capacity !== "training_plan" || planOk), true][step];
   const itype = instances.data?.instances.find((i) => i.type === compute.instance_type);
   const ec2 = compute.provider === "ec2";
 
@@ -250,6 +268,8 @@ function RunWizard() {
       )}
       {step === 2 && (
         <div className="tp-stack">
+          {defaultsLoading && <Spin />}
+          {defaultsError && <Alert tone="error" action={<Button size="sm" onClick={() => { defaults.reload(); templates.reload(); }}>{t("v2.common.retry")}</Button>}>{defaultsError}</Alert>}
           {tpl && tpl.presets.length > 0 && (
             <Card title={t("runs.presets")} sub={t("runs.presetsDesc")}>
               <div className="tp-row">
@@ -271,11 +291,11 @@ function RunWizard() {
             </div>
           </Card>
           <Card title={t("runs.basicParams")}>
-            <div className="v2-form cols-2">{BASIC_KEYS.map((k) => <NumField key={k} k={k} params={params} setParams={setParams} />)}</div>
+            <div className="v2-form cols-2">{BASIC_KEYS.map((k) => <NumField key={k} k={k} params={params} defaults={paramDefaults} setParams={setParams} />)}</div>
           </Card>
           <details className="v2-card" style={{ padding: "16px 24px" }}>
             <summary className="v2-sec-title" style={{ cursor: "pointer" }}>{t("runs.advancedParams")}</summary>
-            <div className="v2-form cols-2">{ADVANCED_KEYS.map((k) => <NumField key={k} k={k} params={params} setParams={setParams} />)}</div>
+            <div className="v2-form cols-2">{ADVANCED_KEYS.map((k) => <NumField key={k} k={k} params={params} defaults={paramDefaults} setParams={setParams} />)}</div>
           </details>
         </div>
       )}

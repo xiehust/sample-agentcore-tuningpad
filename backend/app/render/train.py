@@ -82,6 +82,13 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "enable_thinking": None,
 }
 
+# Shared with the console; templates may override these agent-loop fallbacks.
+AGENT_LOOP_DEFAULTS = {
+    "max_tokens_per_turn": 1024,
+    "tps_limit": 8,
+    "max_rollout_time": 600,
+}
+
 PARAM_BOUNDS = {
     "train_batch_size": (1, 4096),
     "rollout_n": (1, 64),
@@ -269,11 +276,10 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
         "agent_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
         "s3_bucket": "${oc.env:ACR_S3_BUCKET}",
         "exp_id": "${oc.env:EXP_ID}",
-        "max_tokens_per_turn": params.get("max_tokens_per_turn")
-        or template_loop.get("max_tokens_per_turn", 1024),
-        "tps_limit": params.get("tps_limit") or template_loop.get("tps_limit", 8),
-        "max_rollout_time": params.get("max_rollout_time")
-        or template_loop.get("max_rollout_time", 600),
+        **{
+            k: params.get(k) or template_loop.get(k, default)
+            for k, default in AGENT_LOOP_DEFAULTS.items()
+        },
         "gateway_port": GATEWAY_PORT,
         # The port is reachable from the agents' VPC ENIs: only pre-registered sessions.
         "require_registered_sessions": True,

@@ -14,7 +14,7 @@ from ..models import AgentRuntime, Dataset, Run, RunMetric
 from ..pipelines import cluster as pc
 from ..pipelines.run import load_run
 from ..planner import plan as make_plan
-from ..render.train import merge_params
+from ..render.train import AGENT_LOOP_DEFAULTS, DEFAULT_PARAMS, merge_params
 from ..services import hyperpod as hp
 from ..services import pools
 from ..services import project as proj
@@ -141,6 +141,11 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         "params": params,
         "model": m.to_dict(),
     }
+
+
+@router.get("/defaults")
+def defaults():
+    return {"params": DEFAULT_PARAMS, "agent_loop": AGENT_LOOP_DEFAULTS}
 
 
 @router.post("/preview")
