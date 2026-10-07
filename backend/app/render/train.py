@@ -328,18 +328,19 @@ LOG="$RUN_DIR/logs/train.log"
 export HF_HOME={FSX_MOUNT}/hf
 {patch}
 # Durable progress for the console: log + checkpoint index to S3 every 30 s.
-(
-  while true; do
-    aws s3 cp --only-show-errors "$LOG" {s3_prefix}/logs/train.log 2>/dev/null || true
-    ls -1d "$RUN_DIR"/ckpt/global_step_* 2>/dev/null | xargs -r -n1 basename \\
-      | python3 -c 'import sys,json; print(json.dumps({{"steps": [l.strip() for l in sys.stdin]}}))' \\
-      > "$RUN_DIR/logs/ckpt_index.json" || true
-    aws s3 cp --only-show-errors "$RUN_DIR/logs/ckpt_index.json" {s3_prefix}/ckpt_index.json 2>/dev/null || true
-    sleep 30
-  done
-) &
+# A step counts only while its actor/ dir exists: verl's max_actor_ckpt_to_keep deletes
+# global_step_N/actor of rotated-out steps but leaves the global_step_N dir behind.
+sync_progress() {{
+  aws s3 cp --only-show-errors "$LOG" {s3_prefix}/logs/train.log 2>/dev/null || true
+  ls -1d "$RUN_DIR"/ckpt/global_step_*/actor 2>/dev/null | xargs -r -n1 dirname \\
+    | xargs -r -n1 basename \\
+    | python3 -c 'import sys,json; print(json.dumps({{"steps": [l.strip() for l in sys.stdin]}}))' \\
+    > "$RUN_DIR/logs/ckpt_index.json" || true
+  aws s3 cp --only-show-errors "$RUN_DIR/logs/ckpt_index.json" {s3_prefix}/ckpt_index.json 2>/dev/null || true
+}}
+( while true; do sync_progress; sleep 30; done ) &
 SYNC_PID=$!
-trap 'kill $SYNC_PID 2>/dev/null || true; aws s3 cp --only-show-errors "$LOG" {s3_prefix}/logs/train.log || true' EXIT
+trap 'kill $SYNC_PID 2>/dev/null || true; sync_progress' EXIT
 
 echo "[tuningpad] staging data" | tee -a "$LOG"
 {fetch}

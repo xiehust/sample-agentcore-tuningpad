@@ -184,6 +184,30 @@
   - 已修复：GSM8K agent 现在捕获 MaxTokensReachedException，返回 `rewards: 0` 和 `stop_reason: max_tokens`，不再以 500 失败。评测汇总单独统计 `truncated`，Evals 页面加了"截断"列。
   - 更正：Qwen3.5 的 chat template 默认关闭思考模式，之前说"开着思考模式"是错的。
   - V2 兼容性：OfficeBench 模板在模块加载时只做静态初始化，没有问题。`static_checks` 新增检查：模块顶层调用 uuid、random、secrets、os.urandom、time、datetime.now、getpid 时给出 V2 警告。另外有测试保证内置模板没有这类调用。TuningPad 不给 runtime 设置环境变量，V2 的 2.5 KB 环境变量限制对它不适用。
+- 2026-10-07 正式训练（run-10c5a14110，模板预设 `qwen35-2b-8gpu`，1×p5.48xlarge Spot，60 步）：
+  - 13:21 到 15:14 一次跑完，没有重试，GPU 费用约 $41。每步约 137 秒（模板标的是约 101 秒）。
+  - 训练时的 val（200 条）：
+
+    | step | val reward |
+    |---|---|
+    | 0 | 0.54 |
+    | 10 | 0.775 |
+    | 20 | 0.81（最高） |
+    | 30 | 0.785 |
+    | 40 | 0.78 |
+    | 50 | 0.73 |
+    | 60 | 0.79 |
+
+    整体走势和 EC2 上的实验一致：EC2 是 0.545，最高 0.85，最终 0.795。KL 一路升到约 230。
+  - 导出 step 60，部署到 g5，和 HF base 用同样的 200 条 val 评测：
+
+    | 模型 | mean reward | 截断 |
+    |---|---|---|
+    | base | 0.495 | 12/200 |
+    | step 60 | 0.805 | 10/200 |
+
+    提升 0.31，和训练时 val 的提升幅度一致。这证明平台训出来的模型确实更好，导出和推理部署也没有丢失训练效果。
+  - 发现并修复了一个 bug：verl 按 `max_actor_ckpt_to_keep=3` 只保留最近 3 个 checkpoint，删掉的是 `global_step_N/actor`，但 `global_step_N` 目录本身还在。而 checkpoint 索引是按 `global_step_*` 目录生成的，所以 10、20、30 步仍被当作可导出，导出 step 20 时报 actor not found。现在索引只算存在 `actor/` 的步数，训练脚本退出时也会再刷新一次索引，并加了测试。
 - 2026-10-05 清理：rl-dev（us-east-1）第一次删除时 VPC 被平台自建的 sg-acr/sg-nlb 卡住。修复后先删 SG（等待 AgentCore 释放隐藏 ENI），再删栈，最终状态为 `deleted`，VPC 已不存在。
 
 ## Out of Scope

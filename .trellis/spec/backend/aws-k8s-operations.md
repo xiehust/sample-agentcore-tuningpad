@@ -108,3 +108,13 @@ are stale.
 
   The gap follows the weights only. None of these is a cause: MTP removal, the fp32→bf16
   cast, the rewritten tokenizer, `generation_config.json`.
+
+## Checkpoints
+
+- verl's `max_actor_ckpt_to_keep` deletes `global_step_N/actor` of rotated-out steps and
+  keeps the `global_step_N` directory. An index built from `global_step_*` therefore offers
+  steps that cannot be exported (the merge fails with "checkpoint ... not found"). The train
+  script lists `global_step_*/actor`, and refreshes the index on exit as well.
+- The best val step is often not among the last 3 (run-10c5a14110 peaked at step 20). If an
+  operator may want to export the best checkpoint, raise `max_actor_ckpt_to_keep`
+  (FSx space permitting).

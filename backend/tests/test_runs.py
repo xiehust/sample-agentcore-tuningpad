@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -207,6 +208,36 @@ def test_train_script_quotes_and_stages_data():
     assert "apply-megatron-bridge-cp-clamp.sh" in s
     assert "s3://b/runs/run-1/logs/train.log" in s
     assert "python3 -m verl.trainer.main_ppo" in s
+
+
+def test_ckpt_index_lists_only_steps_with_an_actor_dir(tmp_path):
+    """verl's max_actor_ckpt_to_keep deletes global_step_N/actor but keeps the step dir;
+    the index must not offer such steps for export (merge fails: actor not found)."""
+    import subprocess
+
+    s = rt.train_script(
+        run_id="run-1",
+        bucket="b",
+        region="us-east-1",
+        model_id="m",
+        model_dir="/fsx/models/m",
+        data={},
+        hydra=[],
+        profile="fsdp",
+        run_dir=str(tmp_path),
+    )
+    fn = s[s.index("sync_progress() {") : s.index("\n}\n", s.index("sync_progress() {")) + 3]
+    for step, actor in ((10, False), (20, True), (30, True)):
+        (tmp_path / "ckpt" / f"global_step_{step}").mkdir(parents=True)
+        if actor:
+            (tmp_path / "ckpt" / f"global_step_{step}" / "actor").mkdir()
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "train.log").write_text("")
+    bash = f"aws() {{ :; }}\nRUN_DIR={tmp_path}\nLOG=$RUN_DIR/logs/train.log\n{fn}\nsync_progress\n"
+    subprocess.run(["bash", "-c", bash], check=True)
+    index = json.loads((tmp_path / "logs" / "ckpt_index.json").read_text())
+    assert index == {"steps": ["global_step_20", "global_step_30"]}
+    assert "trap 'kill $SYNC_PID 2>/dev/null || true; sync_progress' EXIT" in s
 
 
 def test_rayjob_single_and_multi_node():
