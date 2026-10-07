@@ -437,6 +437,7 @@ export const clusterApi = {
   import: (body: { region: string; hyperpod_name: string; idle_minutes: number; budget_usd: number | null }) =>
     post<{ id: string; job_id: string }>("/api/clusters/import", body),
   nodes: (id: string) => get<ClusterNode[]>(`/api/clusters/${id}/nodes`),
+  replaceNode: (id: string, node: string) => post<{ ok: boolean }>(`/api/clusters/${id}/nodes/${node}/replace`, { confirm: true }),
   repair: (id: string) => post<{ job_id: string }>(`/api/clusters/${id}/components`),
   scale: (id: string, body: GroupBody) => post<{ job_id: string }>(`/api/clusters/${id}/groups`, body),
   deleteGroup: (id: string, group: string) => del<{ job_id: string }>(`/api/clusters/${id}/groups/${group}`),
@@ -720,7 +721,7 @@ export interface EvalView {
   split: string;
   limit: number;
   status: string;
-  summary: { n?: number; scored?: number; failed?: number; mean_reward?: number | null; mean_reward_scored?: number | null; acr_failed_rate?: number | null };
+  summary: { n?: number; scored?: number; failed?: number; truncated?: number; mean_reward?: number | null; mean_reward_scored?: number | null; acr_failed_rate?: number | null };
   results_s3: string | null;
   error: string | null;
   created_at: string;

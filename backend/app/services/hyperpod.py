@@ -334,6 +334,23 @@ def list_nodes(region: str, hyperpod_name: str) -> list[dict[str, Any]]:
             return out
 
 
+def replace_node(region: str, hyperpod_name: str, node_id: str) -> None:
+    """BatchReplaceClusterNodes for one node: fresh hardware, same group config. Instance
+    volumes are lost (checkpoints live on FSx). A running RayJob on it fails and the run
+    monitor resubmits from the latest checkpoint."""
+    resp = aws.client("sagemaker", region).batch_replace_cluster_nodes(
+        ClusterName=hyperpod_name, NodeIds=[node_id]
+    )
+    failed = resp.get("Failed") or []
+    if failed:
+        f = failed[0]
+        raise AppError(
+            "node.replace_failed",
+            f"replace {node_id} failed: {f.get('ErrorCode')} {f.get('Message')}",
+            detail=f,
+        )
+
+
 def search_plans(
     region: str, instance_type: str, count: int, duration_hours: int, start_after: str | None = None
 ) -> list[dict[str, Any]]:

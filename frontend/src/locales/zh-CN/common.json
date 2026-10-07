@@ -127,7 +127,11 @@
     "nodegroup.az_not_in_cluster": "集群在该可用区没有子网",
     "cluster.not_ready": "集群尚未就绪",
     "agent.platform_unsupported_region": "该区域暂不支持 AgentCore Runtime V2，请选择 V1 或自动",
-    "agent.bad_platform_version": "平台版本只能是自动、V1 或 V2"
+    "agent.bad_platform_version": "平台版本只能是自动、V1 或 V2",
+    "node.not_found": "节点不存在",
+    "node.system_group": "不能在 TuningPad 中替换 system 节点",
+    "node.confirm_replace": "请确认后再替换节点",
+    "node.replace_failed": "节点替换失败"
   },
   "common": {
     "apply": "应用",
@@ -406,7 +410,11 @@
     "liveStatus": "HyperPod 状态",
     "subnets": "私有子网",
     "sgAcr": "Agent 安全组",
-    "provisioning": "节点供给模式"
+    "provisioning": "节点供给模式",
+    "replaceNode": "替换",
+    "replaceNodeTitle": "替换节点",
+    "replaceNodeBody": "将终止 {{id}}，并按相同配置新建一个替换节点。节点本地卷的数据会丢失；运行在该节点上的训练会从最新 checkpoint 续训。",
+    "replaceStarted": "正在替换 {{id}}"
   },
   "plans": {
     "search": "查找预留容量",
@@ -689,7 +697,8 @@
     "count": "已计分",
     "endpoint": "推理服务",
     "limit": "样本数",
-    "run": "运行"
+    "run": "运行",
+    "truncated": "截断"
   },
   "overview": {
     "clusters": "集群",

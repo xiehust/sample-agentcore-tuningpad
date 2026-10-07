@@ -12,6 +12,7 @@ from reward import GSM8KReward
 from strands import Agent
 from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
+from strands.types.exceptions import MaxTokensReachedException
 from strands_tools import calculator
 
 from agentcore_rl_toolkit import AgentCoreRLApp
@@ -44,7 +45,13 @@ def invoke_agent(payload: dict, context):
         conversation_manager=NullConversationManager(),
     )
     request = InvocationRequest(**payload)  # prompt must be a str (no toolUse injection)
-    response = agent(request.prompt)
+    try:
+        response = agent(request.prompt)
+    except MaxTokensReachedException:
+        # A turn hit max_tokens_per_turn: a wrong (over-long) answer, not an agent
+        # failure. Scoring 0 keeps the captured turns trainable and keeps the
+        # infra-failure rate (acr_failed) meaningful in training and evals.
+        return {"rewards": 0.0, "stop_reason": "max_tokens"}
     content = response.message.get("content") or []
     text = "".join(block["text"] for block in content if "text" in block)
     rewards = reward_fn(

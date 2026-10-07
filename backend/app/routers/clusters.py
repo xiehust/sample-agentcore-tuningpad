@@ -9,7 +9,7 @@ from ..catalog import instances
 from ..core import aws
 from ..core.config import get_settings
 from ..core.db import new_id, session_scope
-from ..core.errors import AppError, Conflict
+from ..core.errors import AppError, Conflict, NotFound
 from ..jobs.engine import get_engine, job_view, latest_job
 from ..models import Cluster, Run
 from ..pipelines import cluster as pc
@@ -225,6 +225,32 @@ def _price(region: str, itype: str | None) -> float | None:
 def nodes(cid: str):
     c = pc.load(cid)
     return hp.list_nodes(c["region"], c["hyperpod_name"])
+
+
+class ReplaceBody(BaseModel):
+    confirm: bool = False
+
+
+@router.post("/{cid}/nodes/{node_id}/replace")
+def replace_node(cid: str, node_id: str, body: ReplaceBody):
+    """Replace one HyperPod node with new hardware (EC2 node groups: scale instead)."""
+    c = pc.load(cid)
+    node = next(
+        (n for n in hp.list_nodes(c["region"], c["hyperpod_name"]) if n["id"] == node_id), None
+    )
+    if not node:
+        raise NotFound("node.not_found", f"node {node_id} not found")
+    if node["group"] == "system":
+        # the only CPU node runs the guardian, KubeRay, LBC: replacing it is an outage
+        raise AppError("node.system_group", "the system node cannot be replaced from TuningPad")
+    if not body.confirm:
+        raise AppError(
+            "node.confirm_replace",
+            "replacing a node terminates it and loses its instance volumes; confirm to proceed",
+            detail={"node": node_id, "group": node["group"]},
+        )
+    hp.replace_node(c["region"], c["hyperpod_name"], node_id)
+    return {"ok": True}
 
 
 @router.post("/{cid}/components")

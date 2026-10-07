@@ -107,25 +107,25 @@
 ## Acceptance Criteria
 
 - [x] `make verify` 全部通过：backend ruff 加 pytest（hermetic）、frontend eslint、tsc、build、i18n key 一致性检查。
-- [ ] `./start.py` 启动后，UI 为 launchpad V2 风格，可以切换中英文，未登录访问会被拦截。
-- [ ] 单元测试覆盖以下内容：
+- [x] `./start.py` 启动后，UI 为 launchpad V2 风格，可以切换中英文，未登录访问会被拦截。
+- [x] 单元测试覆盖以下内容：
   - 渲染器：RayJob、vLLM Deployment/Service、merge Job、ACR VPC 配置、agentcore_agent.yaml、CFN 参数，覆盖 FSDP/Megatron 和单/多节点组合，关键参数要与仓库中已验证的脚本一致。
   - verl 日志解析：使用实验中的真实日志样例。
   - run 状态机（打桩）：RayJob 失败后从 checkpoint 重新提交、节点替换、超出预算后停止并缩容。
   - 资源规划器：表驱动测试。
   - guardian 的缩容逻辑。
-- [ ] 模型兼容性检查（拉取真实 HF 元数据）：Qwen3.5-2B、Qwen3.6-27B、gpt-oss-20b 判定为兼容；Llama 被阻止，并说明原因。
-- [ ] 真实 AWS，不产生 GPU 费用：
+- [x] 模型兼容性检查（拉取真实 HF 元数据）：Qwen3.5-2B、Qwen3.6-27B、gpt-oss-20b 判定为兼容；Llama 被阻止，并说明原因。
+- [x] 真实 AWS，不产生 GPU 费用：
   - Setup 幂等。
   - 机型和配额视图显示真实数据。
   - 能查询 training plan 报价。
   - 新建集群的 CFN 模板参数通过 validate-template。
-- [ ] 上传不符合契约的数据集或镜像时，UI 显示具体错误，而不是 500。
-- [ ] 需要用户批准费用，单独执行（(a)(b)(c) 均已完成）：
+- [x] 上传不符合契约的数据集或镜像时，UI 显示具体错误，而不是 500。
+- [x] 需要用户批准费用，单独执行（(a)(b)(c) 均已完成）：
   - [x] (a) 创建 HyperPod EKS 集群，只含 system 实例组（CPU，低成本），安装平台组件；在集群 VPC 中部署 GSM8K 模板 agent（VPC 模式）并通过冒烟。
   - [x] (b) 1×p5（或 p4d）实例组扩容，跑 2 步的 GSM8K 冒烟训练：曲线有数据点，checkpoint 写入 FSx；导出 HF 模型到 S3；部署 vLLM 推理；对 base 和训练后的模型各跑一次小规模评估；最后缩容到 0。
   - [x] (c) 可选，另行批准：2 节点 EFA 冒烟训练。
-- [ ] 资源页能列出测试过程中产生的资源，并可以清理（包括删除集群）。
+- [x] 资源页能列出测试过程中产生的资源，并可以清理（包括删除集群）。
 
 ## 验证记录
 
@@ -152,6 +152,33 @@
     - 通信器 `nranks 16`，rank 0 在 head 节点、rank 15 在 worker 节点。
     - 跨节点通道是 `via NET/Libfabric/<n>/GDRDMA`，即 GPUDirect RDMA。
   - 缩容：13:21:01 释放 RayJob，13:21:02 节点组缩到 0，13:22:35 两台实例进入 shutting-down。从训练结束到关机约 1.5 分钟，上次是约 10 分钟。
+- 2026-10-05 其余验收项：
+  - 登录：用 `TUNINGPAD_PASSWORD` 在 0.0.0.0:8199 起临时实例，未登录返回 401 `auth.required`，错误口令返回 `auth.invalid_password`，登录后 200。默认实例只绑定 loopback。
+  - 中英文：用 headless Chromium 分别截取 en 和 zh-CN 的集群页，均为 V2 风格并正确切换语言。
+  - 测试覆盖：新增节点替换的测试，覆盖 `POST /clusters/{id}/nodes/{node}/replace`（BatchReplaceClusterNodes，需确认，禁止替换 system 节点），以及节点被替换导致 RayJob 失败后自动从 checkpoint 续训、最终成功。控制台加了替换按钮。
+  - 模型兼容性（真实 HF 元数据）：
+    - Qwen3.5-2B：兼容，qwen3_5，2.27B。
+    - Qwen3.6-27B：兼容，qwen3_5，27.8B。
+    - gpt-oss-20b：兼容，gptoss，20.9B，MoE。
+    - Llama-3.1-8B：不兼容，原因是 chat template 不在 gateway 注册表中。
+  - 不产生 GPU 费用的 AWS 检查：
+    - 对 us-east-2 重跑 Setup，结果 succeeded。
+    - 机型和配额视图显示真实价格与配额，errors 为空。
+    - training plan 能查到 p5×1、24h 的报价：$1098.42。
+    - validate-template 声明 153 个参数，我们传入的 17 个参数都在其中。
+  - 契约错误：
+    - ECR 以外的镜像返回 400 `agent.bad_image_uri`。
+    - 缺字段的 JSONL 报 `dataset.invalid`，指出 `row 0: missing required field 'question'`。
+    - 非 JSON 文件报 `dataset.bad_json`。
+    - 缺 Dockerfile 的 zip 报 `agent.contract`，列出具体原因。
+  - 资源页：列出了集群、runtime、trainer 镜像、各 S3 前缀和 ECR 的用量及月费用。purge `smoke/` 删除了 2 个对象；对不允许清理的前缀返回 400 `resources.not_purgeable`。
+- 2026-10-07 base 和训练后评测差距的分析：
+  - 逐张量比对了 step-2 导出和 HF base 的权重，两者实际相同：中位相对差为 0，`A_log` 完全一致，最大差异只来自 `linear_attn.norm` 从 fp32 转成 bf16（相对差 2.3e-3）。原因是 lr 5e-6 跑 2 步的更新量低于 bf16 的精度，被舍入掉了。
+  - 所以 0.36 对 0.50 的差距不是训练造成的。但截断率 26/50 对 6/50 差距太大，不是采样噪声，更可能来自导出产物的差异：去掉了 MTP 层、多了 generation_config、重写了 tokenizer 文件、vision model_type 变了。
+  - 这一点尚未定论，记录在 spec `aws-k8s-operations.md` 中。下一步做 A/B：用 base 的 config、tokenizer 和 generation 文件部署导出权重，看截断率是否恢复。
+  - 已修复：GSM8K agent 现在捕获 MaxTokensReachedException，返回 `rewards: 0` 和 `stop_reason: max_tokens`，不再以 500 失败。评测汇总单独统计 `truncated`，Evals 页面加了"截断"列。
+  - 更正：Qwen3.5 的 chat template 默认关闭思考模式，之前说"开着思考模式"是错的。
+  - V2 兼容性：OfficeBench 模板在模块加载时只做静态初始化，没有问题。`static_checks` 新增检查：模块顶层调用 uuid、random、secrets、os.urandom、time、datetime.now、getpid 时给出 V2 警告。另外有测试保证内置模板没有这类调用。TuningPad 不给 runtime 设置环境变量，V2 的 2.5 KB 环境变量限制对它不适用。
 - 2026-10-05 清理：rl-dev（us-east-1）第一次删除时 VPC 被平台自建的 sg-acr/sg-nlb 卡住。修复后先删 SG（等待 AgentCore 释放隐藏 ENI），再删栈，最终状态为 `deleted`，VPC 已不存在。
 
 ## Out of Scope

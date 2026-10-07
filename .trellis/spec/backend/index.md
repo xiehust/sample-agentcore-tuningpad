@@ -19,6 +19,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [AWS / K8s Operations](./aws-k8s-operations.md) | AgentCore V1/V2, cluster delete order, GPU node lifecycle, EFA proof, CPU-node CUDA images, eval sampling | Filled |
 
 ---
 

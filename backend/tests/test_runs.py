@@ -476,3 +476,25 @@ def test_create_run_with_training_plan(client, run_env, monkeypatch):
     n = len(calls)
     d = client.post("/api/runs/preview", json=body).json()
     assert d["training_plan"] is None and len(calls) == n and not d["estimate"]["prepaid"]
+
+
+def test_run_resumes_after_node_replacement(run_env):
+    """A HyperPod node replaced mid-run (auto-recovery or manual) kills its Ray pods: the
+    RayJob fails, the monitor resubmits from the latest FSx checkpoint and the run ends
+    succeeded."""
+    run_env["states"].extend(
+        [
+            {"job": "RUNNING", "deployment": "Running"},
+            {"job": "FAILED", "deployment": "Failed", "message": "worker node lost"},
+        ]
+    )
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    names = [m["metadata"]["name"] for m in run_env["applied"] if m["kind"] == "RayJob"]
+    assert names == ["run-1-a0", "run-1-a1"]
+    # resubmission carries resume_mode=auto so verl picks up the latest checkpoint
+    script = next(m for m in run_env["applied"] if m["kind"] == "ConfigMap")["data"]
+    assert any("resume_mode=auto" in v for v in script.values())
+    with session_scope() as s:
+        r = s.get(Run, "run-1")
+        assert r.status == "succeeded" and r.retries == 1

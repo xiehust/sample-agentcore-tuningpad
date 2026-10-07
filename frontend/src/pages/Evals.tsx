@@ -57,6 +57,7 @@ export default function EvalsPage() {
             { key: "d", title: t("evals.data"), render: (e) => `${datasets.data?.find((d) => d.id === e.dataset_id)?.name ?? e.dataset_id} · ${e.split} · ${e.limit}` },
             { key: "r", title: t("evals.meanReward"), render: (e) => <b style={{ color: e.summary.mean_reward === best && best >= 0 ? "var(--v2-success)" : undefined }}>{num(e.summary.mean_reward, 3)}</b> },
             { key: "f", title: t("evals.failed"), render: (e) => num(e.summary.acr_failed_rate, 3) },
+            { key: "tr", title: t("evals.truncated"), render: (e) => (e.summary.n ? `${e.summary.truncated ?? 0}/${e.summary.n}` : "—") },
             { key: "c", title: t("evals.count"), render: (e) => `${e.summary.scored ?? 0}/${e.summary.n ?? 0}` },
             { key: "t", title: t("common.created"), render: (e) => dateTime(e.created_at) },
             { key: "a", title: "", render: (e) => (e.job ? <Button size="sm" onClick={() => setJob(e.job!.id)}>{t("job.showLog")}</Button> : null) },

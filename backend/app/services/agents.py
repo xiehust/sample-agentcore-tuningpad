@@ -150,7 +150,64 @@ def static_checks(ctx: Path) -> dict[str, Any]:
     dockerfile = (ctx / "Dockerfile").read_text() if (ctx / "Dockerfile").is_file() else ""
     if "8080" not in dockerfile:
         warnings.append("Dockerfile does not EXPOSE 8080 (the AgentCore HTTP contract port)")
+    for p in sorted(ctx.rglob("*.py")):
+        if "dist" in p.parts:
+            continue
+        for lineno, call in snapshot_unsafe_calls(p.read_text(errors="ignore")):
+            warnings.append(
+                f"{p.relative_to(ctx)}:{lineno}: {call}() runs at import time. On AgentCore "
+                "Runtime V2 import-time state is captured once in a snapshot and shared by "
+                "every session; move it into the rollout handler (or deploy with V1)"
+            )
     return {"errors": errors, "warnings": warnings}
+
+
+# Values that must differ per session or can expire: computing them at import time is
+# wrong on Runtime V2, where every instance restores the same post-startup snapshot.
+_SNAPSHOT_UNSAFE = {
+    ("uuid", "uuid1"),
+    ("uuid", "uuid4"),
+    ("os", "urandom"),
+    ("os", "getpid"),
+    ("socket", "gethostname"),
+    ("time", "time"),
+    ("time", "monotonic"),
+    ("datetime", "now"),
+    ("datetime", "utcnow"),
+    ("random", "*"),
+    ("secrets", "*"),
+}
+
+
+def snapshot_unsafe_calls(source: str) -> list[tuple[int, str]]:
+    """Module-level (import-time) calls such as uuid.uuid4() or random.random(); code in
+    function and class bodies runs per request and is not reported."""
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    found: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            return  # deferred: runs per call, not at import
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            base = node.func.value
+            # module.fn() or module.Class.fn() (datetime.datetime.now)
+            root = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", None)
+            name = node.func.attr
+            if root and ((root, name) in _SNAPSHOT_UNSAFE or (root, "*") in _SNAPSHOT_UNSAFE):
+                found.append((node.lineno, f"{root}.{name}"))
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.If) and "__main__" in ast.unparse(stmt.test):
+            continue  # local-run guard, not executed when the runtime imports the app
+        visit(stmt)
+    return found
 
 
 # ---------------- docker ----------------

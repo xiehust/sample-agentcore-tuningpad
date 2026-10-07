@@ -565,3 +565,33 @@ def test_stack_failure_reason_ignores_earlier_operations(stub_aws):
     ]
     stub_aws({"cloudformation": StubClient(describe_stack_events={"StackEvents": events})})
     assert hp.stack_failure_reason("us-east-1", "x") == "VPCStack: VPC failed"
+
+
+def test_replace_node_api(client, stub_aws):
+    _cluster()
+    nodes = {
+        "ClusterNodeSummaries": [
+            {"InstanceId": "i-sys", "InstanceGroupName": "system", "InstanceType": "ml.m5.2xlarge"},
+            {
+                "InstanceId": "i-gpu",
+                "InstanceGroupName": "gpu-p5",
+                "InstanceType": "ml.p5.48xlarge",
+            },
+        ]
+    }
+    sm = StubClient(
+        list_cluster_nodes=nodes,
+        batch_replace_cluster_nodes={"Successful": ["i-gpu"], "Failed": []},
+    )
+    stub_aws({"sagemaker": sm})
+    url = "/api/clusters/cl-1/nodes/{}/replace"
+    assert client.post(url.format("i-nope"), json={}).json()["code"] == "node.not_found"
+    assert client.post(url.format("i-sys"), json={"confirm": True}).json()["code"] == (
+        "node.system_group"
+    )
+    r = client.post(url.format("i-gpu"), json={})
+    assert r.status_code < 500 and r.json()["code"] == "node.confirm_replace"
+    assert "batch_replace_cluster_nodes" not in [n for n, _ in sm.calls]
+    assert client.post(url.format("i-gpu"), json={"confirm": True}).json() == {"ok": True}
+    call = next(kw for n, kw in sm.calls if n == "batch_replace_cluster_nodes")
+    assert call == {"ClusterName": "tp-dev", "NodeIds": ["i-gpu"]}

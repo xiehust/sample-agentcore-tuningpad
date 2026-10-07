@@ -505,8 +505,25 @@ function GroupsCard({ cluster, onJob }: { cluster: Cluster; onJob: (id: string) 
 
 function NodesCard({ cluster }: { cluster: Cluster }) {
   const { t } = useTranslation();
+  const toast = useV2Toast();
   const nodes = useLoad(() => clusterApi.nodes(cluster.id), `nodes-${cluster.id}`);
+  const [replace, setReplace] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   usePoll(nodes.reload, LIST_POLL_MS);
+  const doReplace = async () => {
+    if (!replace) return;
+    setBusy(true);
+    try {
+      await clusterApi.replaceNode(cluster.id, replace);
+      toast("success", t("clusters.replaceStarted", { id: replace }));
+      setReplace(null);
+      nodes.reload();
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Card title={t("clusters.nodes")} flush>
       <Table
@@ -521,7 +538,27 @@ function NodesCard({ cluster }: { cluster: Cluster }) {
           { key: "s", title: t("common.status"), render: (n) => <StatusTag status={n.status} /> },
           { key: "m", title: t("common.detail"), render: (n) => <span className="v2-muted">{n.message ?? ""}</span> },
           { key: "l", title: t("clusters.launched"), render: (n) => dateTime(n.launch_time) },
+          {
+            key: "a",
+            title: "",
+            render: (n) =>
+              n.group === "system" ? null : (
+                <Button size="sm" kind="danger" onClick={() => setReplace(n.id)} testId="tp-node-replace">
+                  {t("clusters.replaceNode")}
+                </Button>
+              ),
+          },
         ]}
+      />
+      <Confirm
+        open={!!replace}
+        title={t("clusters.replaceNodeTitle")}
+        body={t("clusters.replaceNodeBody", { id: replace ?? "" })}
+        confirmLabel={t("clusters.replaceNode")}
+        danger
+        busy={busy}
+        onConfirm={() => void doReplace()}
+        onClose={() => setReplace(null)}
       />
     </Card>
   );

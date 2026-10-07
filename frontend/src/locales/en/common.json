@@ -127,7 +127,11 @@
     "nodegroup.az_not_in_cluster": "The cluster has no subnet in that availability zone",
     "cluster.not_ready": "The cluster is not ready",
     "agent.platform_unsupported_region": "AgentCore Runtime V2 is not available in this region; choose V1 or Auto",
-    "agent.bad_platform_version": "Platform version must be Auto, V1 or V2"
+    "agent.bad_platform_version": "Platform version must be Auto, V1 or V2",
+    "node.not_found": "Node not found",
+    "node.system_group": "The system node cannot be replaced from TuningPad",
+    "node.confirm_replace": "Confirm to replace the node",
+    "node.replace_failed": "The node could not be replaced"
   },
   "common": {
     "apply": "Apply",
@@ -406,7 +410,11 @@
     "liveStatus": "HyperPod status",
     "subnets": "Private subnets",
     "sgAcr": "Agent security group",
-    "provisioning": "Node provisioning"
+    "provisioning": "Node provisioning",
+    "replaceNode": "Replace",
+    "replaceNodeTitle": "Replace node",
+    "replaceNodeBody": "Terminate {{id}} and provision a replacement with the same configuration. Its instance volumes are lost; a training run on it resumes from the latest checkpoint.",
+    "replaceStarted": "Replacing {{id}}"
   },
   "plans": {
     "search": "Find reserved capacity",
@@ -689,7 +697,8 @@
     "count": "Scored",
     "endpoint": "Endpoint",
     "limit": "Examples",
-    "run": "Run"
+    "run": "Run",
+    "truncated": "Truncated"
   },
   "overview": {
     "clusters": "Clusters",

@@ -56,6 +56,46 @@ def test_static_checks_catch_contract_violations(tmp_path):
     assert any("api_key" in w for w in r["warnings"])
 
 
+def test_snapshot_unsafe_import_time_calls_are_flagged(tmp_path):
+    src = (
+        "import uuid, random, time, datetime\n"
+        "RUN_ID = uuid.uuid4().hex\n"
+        "SEED = random.random()\n"
+        "STARTED = datetime.datetime.now()\n"
+        "def handler():\n"
+        "    return uuid.uuid4(), time.time()\n"  # per request: fine
+        "class A:\n"
+        "    def f(self):\n"
+        "        return random.randint(0, 9)\n"
+        "if __name__ == '__main__':\n"
+        "    print(time.time())\n"
+    )
+    assert svc.snapshot_unsafe_calls(src) == [
+        (2, "uuid.uuid4"),
+        (3, "random.random"),
+        (4, "datetime.now"),
+    ]
+    assert svc.snapshot_unsafe_calls("def broken(:\n") == []
+    (tmp_path / "Dockerfile").write_text("EXPOSE 8080\n")
+    (tmp_path / "app.py").write_text(src)
+    w = svc.static_checks(tmp_path)["warnings"]
+    assert sum("Runtime V2" in x for x in w) == 3 and any(x.startswith("app.py:2:") for x in w)
+
+
+def test_templates_are_snapshot_safe():
+    """The shipped templates deploy on V2 by default: no import-time unsafe calls."""
+    from app.core.config import get_settings
+    from app.templates_lib import get_template, template_dir
+
+    for tid in ("gsm8k_math", "officebench"):
+        t = get_template(tid)
+        files = list(template_dir(tid).glob("agent/*.py"))
+        tk = get_settings().toolkit_path / t["toolkit_dir"]
+        files += [tk / f for f in t.get("toolkit_files", []) if f.endswith(".py")]
+        for f in files:
+            assert svc.snapshot_unsafe_calls(f.read_text()) == [], f
+
+
 def test_zip_extraction_rejects_traversal(tmp_path):
     z = tmp_path / "a.zip"
     with zipfile.ZipFile(z, "w") as zf:

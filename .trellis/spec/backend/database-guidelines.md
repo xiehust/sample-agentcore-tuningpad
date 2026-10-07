@@ -49,3 +49,17 @@ Questions to answer:
 <!-- Database-related mistakes your team has made -->
 
 (To be filled by the team)
+
+---
+
+## Schema changes (actual convention)
+
+The database is SQLite and has no migration tool. `init_db()` runs `create_all` and then
+`_add_missing_columns`, which adds every **nullable** model column that an existing table
+lacks. To add a column:
+
+- declare it nullable (`Mapped[str | None]`), so an old `data/tuningpad.db` keeps working
+  after the upgrade;
+- never add a NOT NULL column to an existing table; it is not added in place and queries on
+  an old database fail;
+- cover it the way `test_init_db_adds_new_nullable_columns` does.

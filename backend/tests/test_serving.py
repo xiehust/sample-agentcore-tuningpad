@@ -91,7 +91,20 @@ def test_summarize_eval_counts_failures_as_zero():
     s = svc.summarize_eval(items)
     assert s["n"] == 4 and s["scored"] == 3 and s["failed"] == 1
     assert s["mean_reward"] == 0.5 and s["mean_reward_scored"] == pytest.approx(0.6667, abs=1e-3)
-    assert s["acr_failed_rate"] == 0.25
+    assert s["acr_failed_rate"] == 0.25 and s["truncated"] == 0
+
+
+def test_summarize_eval_scores_truncation_as_wrong_not_failed():
+    strands_500 = "Agent has reached an unrecoverable state due to max_tokens limit."
+    items = [
+        {"success": True, "result": {"rewards": 1.0, "stop_reason": "end_turn"}},
+        {"success": True, "result": {"rewards": 0.0, "stop_reason": "max_tokens"}},
+        {"success": True, "result": {"status_code": 500, "stop_reason": strands_500}},
+        {"success": False, "error": "timeout"},
+    ]
+    s = svc.summarize_eval(items)
+    assert (s["scored"], s["truncated"], s["failed"]) == (3, 2, 1)
+    assert s["mean_reward"] == 0.25 and s["acr_failed_rate"] == 0.25
 
 
 def test_eval_sampling_matches_training_validation():

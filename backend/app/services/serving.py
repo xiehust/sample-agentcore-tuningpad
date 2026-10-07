@@ -286,8 +286,15 @@ def endpoint_state(region: str, eks: str, endpoint_id: str) -> dict[str, Any]:
 
 
 def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
-    rewards, failed = [], 0
+    rewards, failed, truncated = [], 0, 0
     for it in items:
+        stop = str((it.get("result") or {}).get("stop_reason") or "")
+        if "max_tokens" in stop:
+            # turn budget exhausted: an over-long answer, scored 0 (older agents
+            # report it as a 500 with Strands' MaxTokensReachedException text)
+            truncated += 1
+            rewards.append(0.0)
+            continue
         if not it.get("success"):
             failed += 1
             continue
@@ -303,6 +310,7 @@ def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
         "n": n,
         "scored": len(rewards),
         "failed": failed,
+        "truncated": truncated,
         "mean_reward": round(sum(rewards) / n, 4) if n else None,  # failures count as 0
         "mean_reward_scored": round(sum(rewards) / len(rewards), 4) if rewards else None,
         "acr_failed_rate": round(failed / n, 4) if n else None,
