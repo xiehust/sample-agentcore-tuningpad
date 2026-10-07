@@ -87,20 +87,24 @@ are stale.
   `max_tokens = max_tokens_per_turn` and `temperature = val_temperature`
   (`serving.eval_sampling`). Without these limits a turn can run up to vLLM's
   `max_model_len`. In our case 62% of evals failed and they ran slowly.
-- **A 2-step smoke run is not a quality signal.** With bf16 weights, Adam at lr 5e-6 moves
-  each weight by about 5e-6, which is below bf16 resolution, so the update rounds away. A
-  per-tensor diff of the step-2 export against base: median 0, `linear_attn.A_log` exactly
-  equal, and the largest difference was only the fp32→bf16 cast of `linear_attn.norm`
-  (rel 2.3e-3). Compare models only after real training.
-- **Open issue: the same weights served from the export and from HF gave different evals**
-  (50 val, identical sampling): truncated 26/50 for the export versus 6/50 for HF base. That
-  gap is too large to be sampling noise, so it most likely comes from the served artifacts,
-  not the weights. The FSDP merge changes:
-  - drops `mtp.*` and sets `mtp_num_hidden_layers` to 0;
-  - adds `generation_config.json` (base has none);
-  - rewrites `tokenizer.json` / `tokenizer_config.json` (adds audio/tts tokens; ids of the
-    text tokens are unchanged);
-  - changes `vision_config.model_type`.
-  Until an A/B narrows this down (serve the export with the base repo's config, tokenizer and
-  generation files), compare base and trained models only when both are served from merged
-  exports, never an export against an HF id.
+- **A 2-step smoke run is not a quality signal, but it does change the policy.**
+  Two GRPO steps at lr 5e-6 changed 14.3% of all bf16 weight elements, each by about one
+  bf16 ulp (median relative change 6e-3), in 243 of 581 bf16 tensors. Adam's first steps
+  move every parameter by about lr·sign(g). The fp32 master weights cross a bf16 rounding
+  boundary for roughly one element in seven, and that coherent nudge is enough to shift
+  behaviour: the step-2 export truncated 32–35/50 GSM8K evals, against 3–6/50 for base. Do
+  not judge a model by tensor-level statistics (the median tensor diff is 0); count changed
+  elements instead.
+- **Export is faithful (A/B, 2026-10-07, 50 val, identical sampling):**
+
+  | Variant | Truncated |
+  |---|---|
+  | HF base (two runs) | 4/50 and 6/50 |
+  | base weights, MTP dropped, re-saved | 3/50 |
+  | export weights + base config/tokenizer/templates | 35/50 |
+  | export without `generation_config.json` | 34/50 |
+  | export with the 36 fp32 tensors restored | 32/50 |
+  | export as produced | 26/50 |
+
+  The gap follows the weights only. None of these is a cause: MTP removal, the fp32→bf16
+  cast, the rewritten tokenizer, `generation_config.json`.

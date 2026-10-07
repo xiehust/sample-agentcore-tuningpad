@@ -172,10 +172,15 @@
     - 非 JSON 文件报 `dataset.bad_json`。
     - 缺 Dockerfile 的 zip 报 `agent.contract`，列出具体原因。
   - 资源页：列出了集群、runtime、trainer 镜像、各 S3 前缀和 ECR 的用量及月费用。purge `smoke/` 删除了 2 个对象；对不允许清理的前缀返回 400 `resources.not_purgeable`。
-- 2026-10-07 base 和训练后评测差距的分析：
-  - 逐张量比对了 step-2 导出和 HF base 的权重，两者实际相同：中位相对差为 0，`A_log` 完全一致，最大差异只来自 `linear_attn.norm` 从 fp32 转成 bf16（相对差 2.3e-3）。原因是 lr 5e-6 跑 2 步的更新量低于 bf16 的精度，被舍入掉了。
-  - 所以 0.36 对 0.50 的差距不是训练造成的。但截断率 26/50 对 6/50 差距太大，不是采样噪声，更可能来自导出产物的差异：去掉了 MTP 层、多了 generation_config、重写了 tokenizer 文件、vision model_type 变了。
-  - 这一点尚未定论，记录在 spec `aws-k8s-operations.md` 中。下一步做 A/B：用 base 的 config、tokenizer 和 generation 文件部署导出权重，看截断率是否恢复。
+- 2026-10-07 base 和训练后评测差距的分析（结论已定）：
+  - **更正**：之前说"训练没有改动权重"是错的。当时只看了每个张量相对差的中位数（为 0）。按元素统计，2 步 GRPO 改动了 14.3% 的 bf16 元素，每个约 1 个 ulp（中位相对变化 6e-3），涉及 581 个 bf16 张量中的 243 个。
+  - A/B 测试（3 台 g5.2xlarge，50 条 val，采样设置相同），截断数如下：
+    - HF base：4/50、6/50（两次）。
+    - base 权重去掉 MTP 层：3/50。
+    - 导出权重配 base 的元数据文件：35/50。
+    - 导出去掉 generation_config：34/50。
+    - 导出恢复 fp32 张量：32/50。
+  - 结论：差距只跟权重走，是这 2 步训练本身让模型输出变长、更容易被截断。导出流程是正确的，不需要修改。这也说明 2 步冒烟训练不能用来判断模型质量。GPU 费用约 $2，A/B 的临时目录和记录都已清理。
   - 已修复：GSM8K agent 现在捕获 MaxTokensReachedException，返回 `rewards: 0` 和 `stop_reason: max_tokens`，不再以 500 失败。评测汇总单独统计 `truncated`，Evals 页面加了"截断"列。
   - 更正：Qwen3.5 的 chat template 默认关闭思考模式，之前说"开着思考模式"是错的。
   - V2 兼容性：OfficeBench 模板在模块加载时只做静态初始化，没有问题。`static_checks` 新增检查：模块顶层调用 uuid、random、secrets、os.urandom、time、datetime.now、getpid 时给出 V2 警告。另外有测试保证内置模板没有这类调用。TuningPad 不给 runtime 设置环境变量，V2 的 2.5 KB 环境变量限制对它不适用。
