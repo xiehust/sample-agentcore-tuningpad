@@ -14,9 +14,14 @@ from app.render import train as rt
 from app.services import runs as rsvc
 
 
-def _hydra(params_b, itype, nodes=1, ctx=4096, moe=False, params=None):
+def _hydra(params_b, itype, nodes=1, ctx=4096, moe=False, params=None, tuning="auto"):
     p = plan(
-        params_b=params_b, spec=CATALOG[itype], nodes=nodes, max_model_len=ctx, is_moe=moe
+        params_b=params_b,
+        spec=CATALOG[itype],
+        nodes=nodes,
+        max_model_len=ctx,
+        is_moe=moe,
+        tuning=tuning,
     ).to_dict()
     merged = rt.merge_params(
         {
@@ -74,6 +79,15 @@ def test_fsdp_matches_verified_qwen35_2b_script():
     for k, v in expect.items():
         assert h[k] == v, (k, h.get(k), v)
     assert "actor_rollout_ref.actor.megatron.tensor_model_parallel_size" not in h
+    assert "actor_rollout_ref.rollout.load_format" not in h
+
+
+def test_fsdp_lora_loads_base_weights_from_disk():
+    # backends/verl/examples/math_agent/fsdp_lora_sync_grpo.sh; the dummy default made
+    # run-a1f2931440 (Qwen3.5-4B) fail in rebuild_ipc on the first weight sync.
+    h = _hydra(4.66, "p5.48xlarge", ctx=32768, tuning="lora")
+    assert h["actor_rollout_ref.model.lora_rank"] == "32"
+    assert h["actor_rollout_ref.rollout.load_format"] == "safetensors"
 
 
 def test_megatron_matches_verified_officebench_recipe():
@@ -509,10 +523,82 @@ def test_run_budget_stop(run_env, monkeypatch):
         r = s.get(Run, "run-1")
         r.compute = {**r.compute, "budget_usd": 0.0001}
     run_env["states"].extend([{"job": "RUNNING", "deployment": "Running"}] * 3)
-    monkeypatch.setattr(pr, "_cost", lambda run, region: {"node_hours": 1, "est_cost_usd": 9.0})
+    monkeypatch.setattr(
+        pr, "_cost", lambda run, c: ({"node_hours": 1, "est_cost_usd": 9.0}, time.time())
+    )
     job = _wait(eng.get_engine().start("run.train", "run-1", {}))
     assert job.error_code == "run.budget_exceeded"
     assert run_env["deleted"] == ["run-1-a0"]
+
+
+def test_cost_accrues_only_for_billed_nodes(monkeypatch):
+    """Waiting with no instance (capacity timeout, Spot reclaim) costs nothing."""
+    from app.pipelines import run as pr
+
+    billed = {"n": 0}
+    monkeypatch.setattr(pr.pools, "billed_nodes", lambda c, p, n: billed["n"])
+    monkeypatch.setattr(pr.pools, "price_per_hour", lambda r, p, t, cap: 10.0)
+    run = {
+        "progress": {},
+        "node_hours": None,
+        "est_cost_usd": None,
+        "compute": {"nodes": 2, "instance_group": "g", "instance_type": "p5.48xlarge"},
+    }
+    c = {"region": "us-east-2"}
+    totals, now = pr._cost(run, c)  # first poll only sets the baseline
+    assert totals == {"node_hours": 0.0, "est_cost_usd": 0.0}
+    run["progress"] = {"cost_at": now - 3600}
+    assert pr._cost(run, c)[0]["est_cost_usd"] == pytest.approx(0.0)
+    billed["n"] = 5  # never more than the run's own nodes
+    assert pr._cost(run, c)[0]["node_hours"] == pytest.approx(2.0, rel=1e-3)
+    monkeypatch.setattr(pr.pools, "billed_nodes", lambda c, p, n: 1 / 0)
+    run["node_hours"], run["est_cost_usd"] = 1.0, 10.0  # unknown → bill the request
+    assert pr._cost(run, c)[0]["est_cost_usd"] == pytest.approx(30.0, rel=1e-3)
+
+
+def test_faulty_nodes_maps_fault_lines_to_nodes():
+    from app.pipelines import run as pr
+
+    pods = [
+        {"name": "run-1-a1-x-head-a", "type": "head", "ip": "10.0.0.1", "node": "n-head"},
+        {"name": "run-1-a1-x-worker-b", "type": "worker", "ip": "10.0.0.2", "node": "n-w"},
+    ]
+    old = "RuntimeError: ... Error 802: system not yet initialized\n"
+    log = (
+        f"{old}{pr.ATTEMPT_MARK}\n"
+        "(WorkerDict pid=7, ip=10.0.0.2) RuntimeError: CUDA error: GPU is lost\n"
+        "RuntimeError: Unexpected error from cudaGetDeviceCount(). "
+        "Error 802: system not yet initialized\n"
+    )
+    assert pr._faulty_nodes(log, pods) == {"n-head", "n-w"}
+    assert pr._faulty_nodes(old + pr.ATTEMPT_MARK + "\nIndexError: oops\n", pods) == set()
+
+
+def test_run_replaces_faulty_gpu_node_before_retry(run_env, monkeypatch):
+    from app.pipelines import run as pr
+
+    run_env["states"].append({"job": "FAILED", "deployment": "Failed", "message": "x"})
+    fault = f"{pr.ATTEMPT_MARK}\nRuntimeError: ... Error 802: system not yet initialized\n"
+    monkeypatch.setattr(pr.svc, "read_log", lambda region, bucket, rid, off, **k: (fault, off))
+    monkeypatch.setattr(
+        pr.svc,
+        "run_pods",
+        lambda region, eks, rid: [
+            {"name": "run-1-a0-k-head-z", "type": "head", "ip": "10.0.0.9", "node": "n-bad"},
+            {"name": "run-1-a1-k-head-y", "type": "head", "ip": "10.0.0.8", "node": "n-new"},
+        ],
+    )
+    replaced = []
+    monkeypatch.setattr(
+        pr.pools,
+        "replace_node",
+        lambda c, provider, group, node: replaced.append((provider, group, node)) or "ok",
+    )
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    assert replaced == [("hyperpod", "gpu", "n-bad")]  # only the failed attempt's node
+    names = [m["metadata"]["name"] for m in run_env["applied"] if m["kind"] == "RayJob"]
+    assert names == ["run-1-a0", "run-1-a1"]
 
 
 def test_run_preflight_requires_ready_runtime(run_env):

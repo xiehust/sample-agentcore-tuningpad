@@ -213,6 +213,11 @@ def overrides(
                 {
                     "actor_rollout_ref.model.lora_rank": plan["lora_rank"],
                     "actor_rollout_ref.model.lora_alpha": plan["lora_alpha"],
+                    # vLLM loads the base weights from disk; only adapters are synced.
+                    # With the default dummy format verl 0.9 pushes the whole base model
+                    # as CPU tensors, and any tensor over the IPC bucket (e.g. the
+                    # embedding) fails in rebuild_ipc with an IndexError.
+                    "actor_rollout_ref.rollout.load_format": "safetensors",
                 }
             )
     else:  # megatron (officebench / migration recipes)

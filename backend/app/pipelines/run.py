@@ -7,6 +7,7 @@ re-attaches to the RayJob recorded on the run (it never submits twice).
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -26,6 +27,13 @@ from . import trainer as ptrainer
 
 TERMINAL_JOB = {"SUCCEEDED", "FAILED", "STOPPED"}
 POLL_S = 30
+# Driver/hardware faults a retry on the same node cannot fix (run-ba6ebd3e50: the p5's
+# nvidia-fabricmanager failed, so every attempt died in CUDA init with error 802).
+GPU_NODE_FAULTS = re.compile(
+    r"Error 802: system not yet initialized|uncorrectable ECC error|GPU is lost"
+    r"|fallen off the bus"
+)
+ATTEMPT_MARK = "[tuningpad] starting verl main_ppo"  # train script, once per attempt
 
 
 def load_run(run_id: str) -> dict[str, Any]:
@@ -307,23 +315,65 @@ def _ingest_metrics(run: dict[str, Any], region: str, bucket: str) -> dict[str, 
     return upd
 
 
-def _cost(run: dict[str, Any], region: str) -> dict[str, float]:
-    start = run["started_at"]
-    if not start:
-        return {}
-    if start.tzinfo is None:
-        from datetime import UTC
+def _cost(run: dict[str, Any], c: dict[str, Any]) -> tuple[dict[str, float], float]:
+    """Accrue cost since the last poll for the pool's billed instances (≤ the run's nodes).
 
-        start = start.replace(tzinfo=UTC)
-    hours = (utcnow() - start).total_seconds() / 3600
+    Wall-clock × requested nodes over-counted waits with no instance at all (capacity
+    timeouts, Spot reclaims). Returns the totals and the new accounting timestamp; the
+    first call only sets the baseline.
+    """
+    now = time.time()
+    last = (run["progress"] or {}).get("cost_at")
+    totals = {"node_hours": run["node_hours"] or 0.0, "est_cost_usd": run["est_cost_usd"] or 0.0}
+    if last is None:
+        return totals, now
     nodes = int(run["compute"]["nodes"])
+    try:
+        billed = min(nodes, pools.billed_nodes(c, _provider(run), run["compute"]["instance_group"]))
+    except Exception:
+        billed = nodes  # unknown: bill the request so the budget guard never under-counts
+    node_h = max(0.0, now - float(last)) / 3600 * billed
     price = pools.price_per_hour(
-        region,
+        c["region"],
         _provider(run),
         run["compute"]["instance_type"],
         run["compute"].get("capacity", "on_demand"),
     )
-    return {"node_hours": round(hours * nodes, 3), "est_cost_usd": round(hours * nodes * price, 2)}
+    return {
+        "node_hours": totals["node_hours"] + node_h,
+        "est_cost_usd": totals["est_cost_usd"] + node_h * price,
+    }, now
+
+
+def _faulty_nodes(log_tail: str, pods: list[dict[str, Any]]) -> set[str]:
+    """Nodes of the latest attempt that hit a GPU node fault. Ray tags lines from other
+    nodes with `ip=`; untagged lines come from the head (driver) node."""
+    text = log_tail.rsplit(ATTEMPT_MARK, 1)[-1]
+    by_ip = {p["ip"]: p["node"] for p in pods if p.get("ip") and p.get("node")}
+    head = next((p["node"] for p in pods if p.get("type") == "head" and p.get("node")), None)
+    out: set[str] = set()
+    for line in text.splitlines():
+        if not GPU_NODE_FAULTS.search(line):
+            continue
+        m = re.search(r"\bip=(\d+\.\d+\.\d+\.\d+)", line)
+        node = by_ip.get(m.group(1)) if m else head
+        if node:
+            out.add(node)
+    return out
+
+
+def _replace_faulty_nodes(
+    ctx: StageContext, run: dict[str, Any], c: dict[str, Any], rayjob: str, bucket: str
+) -> None:
+    """Before a retry: swap out nodes whose GPUs failed, so the next attempt does not land
+    on the same broken hardware. Must run while the failed attempt's pods still exist."""
+    region, eks = c["region"], c["eks_name"]
+    offset = int((run["progress"] or {}).get("log_offset", 0))
+    tail, _ = svc.read_log(region, bucket, run["id"], max(0, offset - 256 * 1024))
+    pods = [p for p in svc.run_pods(region, eks, run["id"]) if p["name"].startswith(rayjob)]
+    for node in sorted(_faulty_nodes(tail, pods)):
+        msg = pools.replace_node(c, _provider(run), run["compute"]["instance_group"], node)
+        ctx.log(f"GPU node fault on {node}: {msg}")
 
 
 def stage_monitor(ctx: StageContext) -> None:
@@ -339,7 +389,7 @@ def stage_monitor(ctx: StageContext) -> None:
             name = run["rayjob_name"]
             st = svc.rayjob_state(region, eks, name) if name else None
             prog = _ingest_metrics(run, region, bucket)
-            cost = _cost(run, region)
+            cost, prog["cost_at"] = _cost(run, c)
             prog["rayjob"] = st
             save_run(run["id"], progress=prog, **cost)
             step = (load_run(run["id"])["progress"] or {}).get("step")
@@ -367,6 +417,10 @@ def stage_monitor(ctx: StageContext) -> None:
                     f"RayJob {name} {job_status or deploy or 'missing'} — retry "
                     f"{run['retries'] + 1}/{max_retries} from the latest checkpoint"
                 )
+                try:
+                    _replace_faulty_nodes(ctx, run, c, name, bucket)
+                except Exception as e:  # never block the retry itself
+                    ctx.log(f"GPU node fault check skipped: {e}")
                 kube.delete(region, eks, svc.RAYJOB_API, "RayJob", name)
                 save_run(run["id"], retries=run["retries"] + 1, status="retrying")
                 ctx.sleep(30)
@@ -378,7 +432,8 @@ def stage_monitor(ctx: StageContext) -> None:
         run = load_run(ctx.target_id)
         if run["rayjob_name"]:
             kube.delete(region, eks, svc.RAYJOB_API, "RayJob", run["rayjob_name"])
-        save_run(run["id"], status="stopped", ended_at=utcnow())
+        cost, _ = _cost(run, c)
+        save_run(run["id"], status="stopped", ended_at=utcnow(), progress={"cost_at": None}, **cost)
         _ingest_metrics(load_run(run["id"]), region, bucket)
         raise
 
@@ -390,7 +445,9 @@ def stage_finalize(ctx: StageContext) -> None:
     time.sleep(1)
     prog = _ingest_metrics(run, c["region"], bucket)
     prog["ckpt_steps"] = svc.ckpt_steps(c["region"], bucket, run["id"])
-    save_run(run["id"], progress=prog, ended_at=utcnow(), **_cost(run, c["region"]))
+    cost, _ = _cost(run, c)
+    prog["cost_at"] = None  # a later resume starts a fresh accounting window
+    save_run(run["id"], progress=prog, ended_at=utcnow(), **cost)
     _release_rayjob(c, run, ctx.log)
     if run["compute"].get("scale_down_after"):
         scale_down_if_idle(c, run["compute"]["instance_group"], ctx.log, _provider(run))

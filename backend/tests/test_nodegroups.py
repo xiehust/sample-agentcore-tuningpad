@@ -426,6 +426,96 @@ def test_asg_found_by_tag_while_creating(stub_aws):
     assert ngs.asg_counts("us-east-1", ng) == {"running": 1, "in_service": 0}
 
 
+def _k8s_node(ready=True, gpus=8, unschedulable=False, deleting=False):
+    from types import SimpleNamespace as NS
+
+    return NS(
+        metadata=NS(deletion_timestamp="2026-10-08T08:44:00Z" if deleting else None),
+        spec=NS(unschedulable=unschedulable),
+        status=NS(
+            conditions=[NS(type="Ready", status="True" if ready else "False")],
+            allocatable={"nvidia.com/gpu": str(gpus)},
+        ),
+    )
+
+
+def test_ec2_pool_state_ignores_terminating_nodes(stub_aws, monkeypatch):
+    """A shutting-down instance whose node still reports Ready is not capacity."""
+    from types import SimpleNamespace as NS
+
+    nodes = [_k8s_node()]
+    monkeypatch.setattr(
+        pools.k8s, "core", lambda r, e: NS(list_node=lambda label_selector: NS(items=nodes))
+    )
+    group = {"Instances": [{"LifecycleState": "Terminating"}]}
+    stub_aws(
+        {
+            "autoscaling": StubClient(
+                describe_auto_scaling_groups=lambda **kw: {
+                    "AutoScalingGroups": [{"AutoScalingGroupName": "eks-x", **group}]
+                },
+                describe_scaling_activities={"Activities": []},
+            )
+        }
+    )
+    ng = {
+        "nodegroupName": "ec2-p5-spot",
+        "status": "ACTIVE",
+        "scalingConfig": {"desiredSize": 0},
+        "resources": {"autoScalingGroups": [{"name": "eks-x"}]},
+    }
+    monkeypatch.setattr(ngs, "describe", lambda r, e, n: ng)
+    c = {"region": "us-east-2", "eks_name": "eks"}
+    assert pools.state(c, pools.EC2, "ec2-p5-spot", 1)["current"] == 0
+
+    group["Instances"] = [{"LifecycleState": "InService"}]
+    assert pools.state(c, pools.EC2, "ec2-p5-spot", 1)["current"] == 1
+    for bad in (_k8s_node(unschedulable=True), _k8s_node(deleting=True), _k8s_node(gpus=0)):
+        nodes[:] = [bad]
+        assert pools.state(c, pools.EC2, "ec2-p5-spot", 1)["current"] == 0
+
+
+def test_replace_faulty_node_ec2_and_hyperpod(stub_aws, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    patched = []
+    nodes = {
+        "ip-10-1-2-3": NS(
+            metadata=NS(labels={ngs.POOL_LABEL: "ec2-p5-spot"}),
+            spec=NS(provider_id="aws:///us-east-2c/i-0e7876e76d050dfb3"),
+        ),
+        "hyperpod-i-0abc": NS(metadata=NS(labels={pools.HP_LABEL: "gpu"}), spec=NS()),
+    }
+    core = NS(
+        read_node=lambda name: nodes[name],
+        patch_node=lambda name, body: patched.append((name, body)),
+    )
+    monkeypatch.setattr(pools.k8s, "core", lambda r, e: core)
+    asg = stub_aws({"autoscaling": StubClient(terminate_instance_in_auto_scaling_group={})})[
+        "autoscaling"
+    ]
+    hp_calls = []
+    monkeypatch.setattr(pools.hp, "replace_node", lambda r, name, iid: hp_calls.append(iid))
+    c = {"region": "us-east-2", "eks_name": "eks", "hyperpod_name": "hp"}
+
+    msg = pools.replace_node(c, pools.EC2, "ec2-p5-spot", "ip-10-1-2-3")
+    assert "i-0e7876e76d050dfb3" in msg
+    assert asg.calls == [
+        (
+            "terminate_instance_in_auto_scaling_group",
+            {"InstanceId": "i-0e7876e76d050dfb3", "ShouldDecrementDesiredCapacity": False},
+        )
+    ]
+    assert patched == [("ip-10-1-2-3", {"spec": {"unschedulable": True}})]
+
+    pools.replace_node(c, pools.HYPERPOD, "gpu", "hyperpod-i-0abc")
+    assert hp_calls == ["i-0abc"]
+    # never outside the run's pool, never the system group
+    assert pools.replace_node(c, pools.EC2, "other", "ip-10-1-2-3").startswith("skipped")
+    assert pools.replace_node(c, pools.HYPERPOD, "system", "hyperpod-i-0abc").startswith("skipped")
+    assert len(asg.calls) == 1 and hp_calls == ["i-0abc"] and len(patched) == 2
+
+
 def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkeypatch):
     from app.models import Agent, AgentRuntime
     from app.pipelines import cluster as pc

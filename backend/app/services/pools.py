@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..catalog import instances
-from ..core import k8s
+from ..core import aws, k8s
 from ..core.errors import AppError, Conflict
 from . import hyperpod as hp
 from . import nodegroups as ng
@@ -167,7 +167,7 @@ def scale(c: dict[str, Any], provider: str, name: str, count: int) -> bool:
 
 
 def _ready_ec2_nodes(c: dict[str, Any], name: str) -> int:
-    """Nodes that can take GPU pods: Ready and advertising nvidia.com/gpu."""
+    """Nodes that can take GPU pods: Ready, schedulable, not being deleted, with nvidia.com/gpu."""
     nodes = (
         k8s.core(c["region"], c["eks_name"])
         .list_node(label_selector=f"{ng.POOL_LABEL}={name}")
@@ -175,6 +175,8 @@ def _ready_ec2_nodes(c: dict[str, Any], name: str) -> int:
     )
     ok = 0
     for n in nodes:
+        if n.metadata.deletion_timestamp or (n.spec and n.spec.unschedulable):
+            continue  # drained or leaving the group
         ready = any(
             cond.type == "Ready" and cond.status == "True" for cond in n.status.conditions or []
         )
@@ -196,11 +198,13 @@ def state(c: dict[str, Any], provider: str, name: str, want: int) -> dict[str, A
     if not n:
         return {"current": 0, "status": "MISSING", "why": None, "failed": "node group not found"}
     cur = _ready_ec2_nodes(c, name)
+    asg = ng.asg_counts(c["region"], n)
+    # A terminating instance's node object can still look Ready for minutes; counting it
+    # let a run skip the scale-up and leave its head pod Pending (run-6e153739fb).
+    cur = min(cur, asg["in_service"])
     why = ng.latest_failure(c["region"], n) if cur < want else None
-    if cur < want and not why:
-        asg = ng.asg_counts(c["region"], n)
-        if asg["in_service"] >= want:
-            why = "instances running; waiting for the node to join and the GPU plugin"
+    if cur < want and not why and asg["in_service"] >= want:
+        why = "instances running; waiting for the node to join and the GPU plugin"
     failed = None
     if n.get("status") in ("CREATE_FAILED", "DELETING", "DEGRADED") and cur < want:
         issues = (n.get("health") or {}).get("issues") or []
@@ -208,6 +212,45 @@ def state(c: dict[str, Any], provider: str, name: str, want: int) -> dict[str, A
         if n.get("status") == "DEGRADED":
             failed = None  # degraded usually means capacity issues; keep waiting
     return {"current": cur, "status": n.get("status"), "why": why, "failed": failed}
+
+
+def billed_nodes(c: dict[str, Any], provider: str, name: str) -> int:
+    """Instances of the pool that cost money right now (launching or running)."""
+    if provider == HYPERPOD:
+        g = hp.raw_group(hp.describe_cluster(c["region"], c["hyperpod_name"]), name) or {}
+        return int(g.get("CurrentCount", 0))
+    n = ng.describe(c["region"], c["eks_name"], name)
+    return ng.asg_counts(c["region"], n)["running"] if n else 0
+
+
+def replace_node(c: dict[str, Any], provider: str, name: str, node_name: str) -> str:
+    """Cordon a faulty GPU node of pool `name` and get fresh hardware in its place.
+
+    EC2: the instance is terminated without lowering the desired size, so the node group
+    launches a replacement. HyperPod: BatchReplaceClusterNodes. Nodes outside the pool
+    (and the system group) are never touched. Returns what was done, for the job log.
+    """
+    if name == hp.SYSTEM_GROUP:
+        return f"skipped {node_name}: the system group is never replaced"
+    core = k8s.core(c["region"], c["eks_name"])
+    node = core.read_node(node_name)
+    label = ng.POOL_LABEL if provider == EC2 else HP_LABEL
+    if (node.metadata.labels or {}).get(label) != name:
+        return f"skipped {node_name}: not in pool {name}"
+    if provider == EC2:
+        iid = ((node.spec and node.spec.provider_id) or "").rsplit("/", 1)[-1]
+    else:
+        iid = node_name.removeprefix("hyperpod-")
+    if not iid.startswith("i-"):
+        return f"skipped {node_name}: no instance id"
+    core.patch_node(node_name, {"spec": {"unschedulable": True}})
+    if provider == EC2:
+        aws.client("autoscaling", c["region"]).terminate_instance_in_auto_scaling_group(
+            InstanceId=iid, ShouldDecrementDesiredCapacity=False
+        )
+        return f"cordoned and terminated {iid}; node group {name} launches a replacement"
+    hp.replace_node(c["region"], c["hyperpod_name"], iid)
+    return f"cordoned {node_name}; HyperPod is replacing {iid}"
 
 
 def price_per_hour(region: str, provider: str, instance_type: str, capacity: str) -> float:
