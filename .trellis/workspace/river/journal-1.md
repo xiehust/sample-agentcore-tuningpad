@@ -73,3 +73,39 @@ Resolved the export-vs-base eval gap by A/B (gap follows trained weights, export
 - Fill the placeholder backend/frontend specs (00-bootstrap-guidelines)
 - Decide whether to keep or delete cluster rl-dev-2 (us-east-2) to stop baseline cost
 - Real validation still missing: HyperPod instance-group GPU path, guardian/auto-resume in cluster, Megatron, OfficeBench training
+
+
+## Session 3: Fill backend/frontend Trellis specs; archive finished tasks
+<!-- trellis-session: v=2 fp=313fdf387e6620e6 -->
+
+**Date**: 2026-10-08
+**Task**: Fill backend/frontend Trellis specs; archive finished tasks
+**Branch**: `main`
+
+### Summary
+
+Archived 10-07-training-param-defaults (code in a60bdeb) and back-filled the 10-07 journal entry; replaced all trellis-init placeholder specs (5 backend + 6 frontend + 2 indexes) with source-backed guidelines, independently reviewed against the code; bootstrap task archived.
+
+### Main Changes
+
+- backend specs: directory structure, database (SQLAlchemy/SQLite, JSON columns, nullable-column upgrades), error handling (AppError envelope, worker vs HTTP paths, apiErrors localization), logging, quality gate
+- frontend specs: directory structure, v2 kit components, useLoad/useJob hooks, state ownership (display defaults vs explicit overrides), type safety, quality/i18n
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `daa2169` | docs(spec): fill backend and frontend Trellis guidelines from source |
+
+### Testing
+
+- [OK] [OK] make verify PASS; placeholder grep empty; index tables match files; 29 relative links resolve; 13 cited symbols spot-checked by grep
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Decide whether to keep or delete cluster rl-dev-2 (us-east-2)
+- Real validation still missing (needs cost approval): HyperPod instance-group GPU path, guardian/auto-resume in cluster, Megatron, OfficeBench training
