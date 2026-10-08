@@ -31,3 +31,45 @@ AgentCore Runtime V2 (platformVersion auto) verified on rl-dev-2; 1x and 2x p5 S
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Training param defaults, export-vs-base A/B, 60-step GSM8K run
+<!-- trellis-session: v=2 fp=34a9c920ed6f6216 -->
+
+**Date**: 2026-10-08
+**Task**: Training param defaults, export-vs-base A/B, 60-step GSM8K run
+**Branch**: `main`
+
+### Summary
+
+Resolved the export-vs-base eval gap by A/B (gap follows trained weights, export is correct); training wizard now shows concrete backend/template defaults; 60-step Qwen3.5-2B GSM8K run on 1x p5 Spot lifted val mean reward from 0.495 (base) to 0.805; checkpoint index fixed to list only steps that still have an actor dir.
+
+### Main Changes
+
+- GET /api/runs/defaults serves DEFAULT_PARAMS and shared AGENT_LOOP_DEFAULTS; Runs wizard shows them as placeholders, Auto kept only for LR, vLLM memory share, backend and tuning strategy; unset steps read 'Run all epochs'
+- GSM8K agent returns rewards 0 / stop_reason max_tokens on MaxTokensReachedException; evals count truncated separately
+- Checkpoint index counts only global_step_* dirs with actor/, refreshed again on trainer exit (max_actor_ckpt_to_keep pruning broke export of pruned steps)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `29f0221` | spec/PRD: export-vs-base eval gap resolved by A/B (weights, not export artifacts) |
+| `a60bdeb` | fix(runs): show concrete training parameter defaults |
+| `237dde2` | Checkpoint index lists only steps with an actor dir; record 60-step run (base 0.495 -> 0.805) |
+
+### Testing
+
+- [OK] [OK] make verify; hermetic tests for defaults routing, template loop defaults, explicit/cleared/zero values, checkpoint index
+- [OK] [OK] isolated agent-browser checks against a mock API (en/zh-CN, presets, template switching, retry)
+- [OK] [OK] real run run-10c5a14110: 60 steps, ~$41 GPU, export step 60 -> vLLM on g5 -> 200-row val eval
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Fill the placeholder backend/frontend specs (00-bootstrap-guidelines)
+- Decide whether to keep or delete cluster rl-dev-2 (us-east-2) to stop baseline cost
+- Real validation still missing: HyperPod instance-group GPU path, guardian/auto-resume in cluster, Megatron, OfficeBench training

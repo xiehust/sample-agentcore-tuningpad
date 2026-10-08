@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-10-07
+- **Total Sessions**: 2
+- **Last Active**: 2026-10-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~33 | Active |
+| `journal-1.md` | ~75 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-10-08 | Training param defaults, export-vs-base A/B, 60-step GSM8K run | `29f0221`, `a60bdeb`, `237dde2` | `main` |
 | 1 | 2026-10-07 | Runtime V2, serving on G5, EFA validation, PRD sign-off | `b5da679`, `55b8b41`, `080877b`, `fa90138`, `08caeb2` | `main` |
 <!-- @@@/auto:session-history -->
 
