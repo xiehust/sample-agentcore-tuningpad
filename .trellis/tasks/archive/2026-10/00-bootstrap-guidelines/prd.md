@@ -21,9 +21,13 @@ the rest conversationally.
 
 ## Status (update the checkboxes as you complete each item)
 
-- [ ] Fill backend guidelines
-- [ ] Fill frontend guidelines
-- [ ] Add code examples
+- [x] Fill backend guidelines
+- [x] Fill frontend guidelines
+- [x] Add code examples
+
+Completed 2026-10-08: all backend/frontend spec files written from source (file paths,
+symbols, real bugs as anti-patterns), independently reviewed against the code, no
+placeholders left, index tables match the files, `make verify` PASS.
 
 ---
 
