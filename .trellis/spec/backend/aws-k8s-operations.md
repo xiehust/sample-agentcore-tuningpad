@@ -66,6 +66,34 @@ are stale.
   `NCCL_DEBUG_SUBSYS=INIT,NET`. The train log must show
   `NET/OFI Selected provider is efa` and `via NET/Libfabric/<n>/GDRDMA`. Containers cannot
   read the EFA hw_counters, so they are no use as evidence.
+- **A terminating instance is not capacity.** After an instance starts shutting down, its
+  k8s Node stays `Ready` with `nvidia.com/gpu` for minutes. `pools.state` caps the EC2 count
+  at the ASG's `InService` instances and skips unschedulable or deleting nodes. Without the
+  cap, run-6e153739fb skipped the scale-up and its head pod sat `Pending` on no node.
+- **Bad GPU hardware passes every readiness check.** On one p5, `nvidia-fabricmanager`
+  failed (`failed to configure all the available GPUs or NVSwitches`; `nvidia-smi -q`
+  Fabric State stuck at `In Progress`). The device plugin still advertised 8 GPUs, and every
+  attempt died in CUDA init with `Error 802: system not yet initialized`. Before a retry the
+  run monitor matches `GPU_NODE_FAULTS` in the failed attempt's log and calls
+  `pools.replace_node`: cordon, then an ASG terminate without decrement (EC2) or
+  BatchReplaceClusterNodes (HyperPod). It touches only the run's pool, never `system`.
+- **Run cost accrues per poll from billed instances** (`pools.billed_nodes`, capped at the
+  run's nodes), not from wall-clock × requested nodes. Capacity waits, Spot reclaims and
+  pending pods with no instance cost nothing. If the count is unknown, the run is billed
+  for its requested nodes, so the budget guard never under-counts.
+- **Spot capacity moves by the hour.** The p5 placement score in us-east-2 fell from 9 to 1
+  within two hours on 2026-10-08, and the node was reclaimed mid-run. An `UnfulfillableCapacity`
+  launch failure with a score of 1–3 means no capacity, not a bad request. Check
+  `get-spot-placement-scores` before choosing a region.
+
+## verl LoRA
+
+- **FSDP LoRA must set `rollout.load_format=safetensors`** (`render/train.py`), as the
+  toolkit's `fsdp_lora_sync_grpo.sh` does. verl 0.9 defaults to `dummy`. The first weight
+  sync then pushes the whole base model as CPU tensors (`collect_lora_params`), and any
+  tensor larger than the 512 MB IPC bucket (the 1.27 GB Qwen3.5-4B embedding) is sent
+  directly. `rebuild_ipc` then fails with `IndexError: list assignment index out of range`
+  (run-a1f2931440). Megatron LoRA uses `lora.merge=True` and does not need this.
 
 ## Containers on CPU nodes
 
