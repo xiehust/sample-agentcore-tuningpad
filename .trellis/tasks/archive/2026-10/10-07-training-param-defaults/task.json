@@ -3,7 +3,7 @@
   "name": "training-param-defaults",
   "title": "训练参数显示实际默认值",
   "description": "新建训练任务显示固定及模板默认值，仅模型和资源相关项保留自动，训练步数明确显示跑满轮数语义。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,11 +11,11 @@
   "creator": "river",
   "assignee": "river",
   "createdAt": "2026-10-07",
-  "completedAt": null,
+  "completedAt": "2026-10-08",
   "branch": "main",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "a60bdeb",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -29,6 +29,6 @@
     "frontend/src/locales/en/common.json",
     "frontend/src/locales/zh-CN/common.json"
   ],
-  "notes": "Implementation and all acceptance checks complete. Final make verify and isolated browser regression checks passed on 2026-10-07. Pending code commit and task archival; no real AWS/Kubernetes operations.",
+  "notes": "Implementation and all acceptance checks complete. Final make verify and isolated browser regression checks passed on 2026-10-07. Code committed in a60bdeb; no real AWS/Kubernetes operations.",
   "meta": {}
 }
