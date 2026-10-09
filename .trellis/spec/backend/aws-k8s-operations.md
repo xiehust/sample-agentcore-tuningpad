@@ -85,6 +85,21 @@ are stale.
   within two hours on 2026-10-08, and the node was reclaimed mid-run. An `UnfulfillableCapacity`
   launch failure with a score of 1–3 means no capacity, not a bad request. Check
   `get-spot-placement-scores` before choosing a region.
+- **Scale-down is per pool.** `scale_down_if_idle` counts only active runs on the same
+  `instance_group`. When Spot and On-Demand pools of one cluster race for capacity, the
+  stopped loser must still drop its own pool to 0, or a late launch bills idle until the
+  guardian's idle window ends.
+- **The guardian works without the backend** (verified 2026-10-09, us-east-1): with
+  `idle_minutes=10` and nothing scheduled, it scaled `ec2-g5-serve` from 2 to 0 on its own
+  and recorded `scale_to_zero` / `idle 14 min` in the ledger.
+
+## Logs
+
+- Training logs page by **bytes**. verl's progress bars are full of multi-byte characters
+  (`│`), so a full 256 KB page decodes to far fewer characters. `eof` compares bytes read,
+  and `read_log` holds back a UTF-8 character split by the page edge. Judging `eof` by
+  `len(text)` stopped readers after the first page (run-210c57c0cb) and looked exactly like
+  a stalled S3 sync.
 
 ## verl LoRA
 
@@ -94,6 +109,12 @@ are stale.
   tensor larger than the 512 MB IPC bucket (the 1.27 GB Qwen3.5-4B embedding) is sent
   directly. `rebuild_ipc` then fails with `IndexError: list assignment index out of range`
   (run-a1f2931440). Megatron LoRA uses `lora.merge=True` and does not need this.
+- **Megatron must run with `--config-name ppo_megatron_trainer`** (`train_script`), as both
+  toolkit Megatron scripts do. verl's default `ppo_trainer` config has no `actor.megatron`
+  node, so the first Megatron run failed in Hydra with `Key 'megatron' is not in struct`
+  (run-dad915e023). Override-only tests could not catch this: check new override sets by
+  composing them offline against the pinned verl wheel's `verl/trainer/config`
+  (`hydra.compose`), which reproduces the failure without a GPU.
 
 ## Containers on CPU nodes
 

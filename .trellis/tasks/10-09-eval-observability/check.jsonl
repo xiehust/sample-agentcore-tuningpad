@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AppError codes + apiErrors locale"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "aws.client factory, hermetic tests"}
+{"file": ".trellis/spec/backend/aws-k8s-operations.md", "reason": "AgentCore runtime/cluster delete lessons"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "v2 kit usage"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "i18n + verify gate"}
