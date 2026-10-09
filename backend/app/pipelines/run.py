@@ -469,17 +469,20 @@ def _release_rayjob(c: dict[str, Any], run: dict[str, Any], log) -> None:
 
 
 def scale_down_if_idle(c: dict[str, Any], group: str, log, provider: str = pools.HYPERPOD) -> None:
+    """Scale `group` to 0 unless another active run uses that same pool. Runs on other
+    pools of the cluster do not count: a stopped Spot run must not leave its pending
+    scale-up behind just because an On-Demand run is busy on a sibling pool."""
     with session_scope() as s:
-        busy = (
-            s.query(Run)
-            .filter(
+        busy = [
+            r.id
+            for r in s.query(Run).filter(
                 Run.cluster_id == c["id"],
                 Run.status.in_(["running", "retrying", "preparing", "waiting_capacity"]),
             )
-            .count()
-        )
+            if (r.compute or {}).get("instance_group") == group
+        ]
     if busy:
-        log("other runs active on the cluster; leaving capacity (guardian handles idle)")
+        log(f"{', '.join(busy)} still use {group}; leaving capacity (guardian handles idle)")
         return
     if provider == pools.EC2:
         if pools.scale(c, pools.EC2, group, 0):

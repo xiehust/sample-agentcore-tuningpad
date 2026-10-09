@@ -221,7 +221,19 @@ def test_train_script_quotes_and_stages_data():
     assert "'data.train_files=['\"'\"'/x'\"'\"']'" in s  # shlex-quoted
     assert "apply-megatron-bridge-cp-clamp.sh" in s
     assert "s3://b/runs/run-1/logs/train.log" in s
-    assert "python3 -m verl.trainer.main_ppo" in s
+    assert "python3 -m verl.trainer.main_ppo \\\n    --config-name ppo_megatron_trainer \\" in s
+    fsdp = rt.train_script(
+        run_id="run-1",
+        bucket="b",
+        region="us-east-1",
+        model_id="m",
+        model_dir="/fsx/models/m",
+        data={},
+        hydra=["a=1"],
+        profile="fsdp",
+        run_dir="/fsx/runs/run-1",
+    )
+    assert "--config-name" not in fsdp  # FSDP keeps verl's default ppo_trainer config
 
 
 def test_ckpt_index_lists_only_steps_with_an_actor_dir(tmp_path):
@@ -601,6 +613,40 @@ def test_run_replaces_faulty_gpu_node_before_retry(run_env, monkeypatch):
     assert names == ["run-1-a0", "run-1-a1"]
 
 
+def test_scale_down_ignores_runs_on_other_pools(run_env):
+    """Racing Spot and On-Demand pools: stopping the loser must drop its own pool to 0 even
+    though the winner is busy on a sibling pool of the same cluster."""
+    from app.pipelines import run as pr
+
+    def add(rid, group):
+        with session_scope() as s:
+            s.add(
+                Run(
+                    id=rid,
+                    name=rid,
+                    agent_runtime_id="rt-1",
+                    cluster_id="cl-1",
+                    train_dataset_id="ds-1",
+                    model_id="Qwen/Qwen3.5-2B",
+                    spec={},
+                    compute={"instance_group": group, "instance_type": "p5.4xlarge", "nodes": 1},
+                    status="running",
+                    progress={},
+                )
+            )
+
+    c = {"id": "cl-1", "region": "us-east-1", "hyperpod_name": "hp"}
+    add("run-od", "gpu-od")
+    run_env["hp"]["current"] = 1
+    logs: list[str] = []
+    pr.scale_down_if_idle(c, "gpu", logs.append, pr.pools.HYPERPOD)
+    assert run_env["hp"]["current"] == 0, logs  # the busy sibling pool does not hold it
+    add("run-2", "gpu")
+    run_env["hp"]["current"] = 1
+    pr.scale_down_if_idle(c, "gpu", logs.append, pr.pools.HYPERPOD)
+    assert run_env["hp"]["current"] == 1 and "run-2" in logs[-1]
+
+
 def test_run_preflight_requires_ready_runtime(run_env):
     with session_scope() as s:
         s.get(AgentRuntime, "rt-1").status = "failed"
@@ -610,6 +656,41 @@ def test_run_preflight_requires_ready_runtime(run_env):
 
 def test_rayjob_name_is_dns_safe():
     assert rsvc.rayjob_name("run-AB12", 3) == "run-ab12-a3"
+
+
+def test_log_pages_keep_utf8_characters_whole(stub_aws):
+    """verl's progress bars are full of '│' (3 bytes): a page boundary inside one must not
+    yield U+FFFD, and a full page must not report eof (run-210c57c0cb)."""
+    import io
+
+    from tests.conftest import StubClient
+
+    body = ("x" * 9 + "│" + "tail\n").encode()  # '│' spans bytes 9..11
+
+    def get_object(Bucket, Key, Range):
+        a, b = (int(v) for v in Range.removeprefix("bytes=").split("-"))
+        return {"Body": io.BytesIO(body[a : b + 1])}
+
+    stub_aws({"s3": StubClient(get_object=get_object)})
+    first, off = rsvc.read_log("us-east-1", "b", "run-1", 0, max_bytes=10)
+    assert first == "x" * 9 and off == 9  # the split character waits for the next page
+    rest, end = rsvc.read_log("us-east-1", "b", "run-1", off, max_bytes=10)
+    assert first + rest == body.decode() and end == len(body) and "\ufffd" not in rest
+
+
+def test_log_endpoint_eof_counts_bytes(client, run_env, monkeypatch):
+    from app.routers import runs as rr
+
+    page = 256 * 1024
+    monkeypatch.setattr(rr.proj, "require_region", lambda region: {"bucket": "b"})
+    chunk = "│" * (page // 3)  # a full page of bytes, only a third as many characters
+    monkeypatch.setattr(
+        rr.svc, "read_log", lambda r, b, rid, off, max_bytes: (chunk, off + len(chunk.encode()))
+    )
+    d = client.get("/api/runs/run-1/log?offset=0").json()
+    assert d["eof"] is False and d["next_offset"] == len(chunk.encode())
+    monkeypatch.setattr(rr.svc, "read_log", lambda r, b, rid, off, max_bytes: ("", off))
+    assert client.get(f"/api/runs/run-1/log?offset={d['next_offset']}").json()["eof"] is True
 
 
 def test_create_run_with_training_plan(client, run_env, monkeypatch):

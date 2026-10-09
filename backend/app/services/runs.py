@@ -171,6 +171,16 @@ def read_log(
             return "", offset
         raise
     data = r["Body"].read()
+    if len(data) == max_bytes:
+        # don't split a multi-byte UTF-8 character across pages: hold back its lead bytes
+        cut = len(data)
+        for i in range(1, min(4, len(data)) + 1):
+            b = data[-i]
+            if b & 0xC0 != 0x80:  # lead byte (or ASCII) of the last character
+                need = 1 if b < 0x80 else 2 if b >> 5 == 6 else 3 if b >> 4 == 14 else 4
+                cut = len(data) - i if need > i else len(data)
+                break
+        data = data[:cut]
     return data.decode("utf-8", errors="replace"), offset + len(data)
 
 

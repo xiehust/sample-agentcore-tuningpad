@@ -319,6 +319,10 @@ def train_script(
         for dst, src in data.items()
     )
     args = " \\\n    ".join(shlex.quote(h) for h in hydra)
+    if profile == "megatron":
+        # verl's default config (ppo_trainer) has no actor.megatron node: every megatron
+        # override fails with "Key 'megatron' is not in struct" (run-dad915e023).
+        args = "--config-name ppo_megatron_trainer \\\n    " + args
     patch = (
         "bash /opt/toolkit/patches/apply-megatron-bridge-cp-clamp.sh || true\n"
         if profile == "megatron"

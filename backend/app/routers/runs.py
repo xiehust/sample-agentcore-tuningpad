@@ -257,8 +257,10 @@ def log(run_id: str, offset: int = 0):
     run = load_run(run_id)
     region = pc.load(run["cluster_id"])["region"]
     bucket = proj.require_region(region)["bucket"]
-    text, nxt = svc.read_log(region, bucket, run_id, max(0, offset), max_bytes=256 * 1024)
-    return {"content": text, "next_offset": nxt, "eof": len(text) < 256 * 1024}
+    page = 256 * 1024
+    text, nxt = svc.read_log(region, bucket, run_id, max(0, offset), max_bytes=page)
+    # eof by bytes, not characters: a full page of multi-byte text decodes to < page chars
+    return {"content": text, "next_offset": nxt, "eof": nxt - max(0, offset) < page - 3}
 
 
 @router.get("/{run_id}/pods")
