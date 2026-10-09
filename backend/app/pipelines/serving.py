@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from ..core import aws
-from ..core.db import session_scope
+from ..core.db import session_scope, utcnow
 from ..core.errors import AppError
 from ..jobs.engine import Stage, StageContext, register
-from ..models import AgentRuntime, Dataset, Eval, Export, InferenceEndpoint, Run, TrainerImage
+from ..models import AgentRuntime, Eval, Export, InferenceEndpoint, Run, TrainerImage
 from ..services import datasets as dsvc
 from ..services import kube
 from ..services import project as proj
@@ -187,19 +187,12 @@ register("inference.delete", [Stage("delete", stage_delete_endpoint)])
 
 
 def _payloads(dataset_id: str, split: str, limit: int) -> list[dict[str, Any]]:
-    with session_scope() as s:
-        d = s.get(Dataset, dataset_id)
-        if not d or split not in (d.splits or {}):
-            raise AppError("eval.bad_split", f"split {split} not found")
-        region, key = d.region, d.splits[split]["s3_key"]
-    local = dsvc.local_dir(dataset_id) / f"{split}.parquet"
-    if not local.exists():
-        bucket = proj.require_region(region)["bucket"]
-        aws.client("s3", region).download_file(bucket, key, str(local))
-    import pandas as pd
+    from ..services import evals as esvc
 
-    df = pd.read_parquet(local).head(limit)
-    return [dsvc._to_jsonable(p) for p in df["payload"]]
+    df = esvc.split_frame(dataset_id, split)
+    if df is None:
+        raise AppError("eval.bad_split", f"split {split} not found")
+    return [dsvc._to_jsonable(p) for p in df.head(limit)["payload"]]
 
 
 def stage_eval(ctx: StageContext) -> None:
@@ -215,6 +208,10 @@ def stage_eval(ctx: StageContext) -> None:
                 "pick a ready agent runtime deployed to the endpoint's cluster (VPC)",
             )
         runtime_arn = rt.runtime_arn
+        if ev.get("observe"):
+            runtime_arn = ev.get("obs_runtime_arn") or ""
+            if not runtime_arn:
+                raise AppError("eval.runtime", "the eval trace runtime is not deployed")
         from ..models import Agent
 
         agent = s.get(Agent, rt.agent_id)
@@ -234,7 +231,8 @@ def stage_eval(ctx: StageContext) -> None:
     bucket = proj.require_region(c["region"])["bucket"]
     key = svc.read_api_key(c["region"], c["eks_name"], ep["id"])
     payloads = _payloads(ev["dataset_id"], ev["split"], ev["limit"])
-    _save(Eval, ev["id"], status="running")
+    _save(Eval, ev["id"], status="running", started_at=utcnow(), ended_at=None)
+    from ..services import evals as esvc
     from ..services.agents import rollout_client
 
     client = rollout_client(
@@ -261,6 +259,7 @@ def stage_eval(ctx: StageContext) -> None:
                 "error": it.error,
                 "elapsed": getattr(it, "elapsed", None),
             }
+            rec["session_id"] = esvc.session_id_of(rec)  # joins the sample to its spans
             items.append(rec)
             f.write(json.dumps(rec, default=str) + "\n")
             if len(items) % 10 == 0:
@@ -276,6 +275,7 @@ def stage_eval(ctx: StageContext) -> None:
         ev["id"],
         summary=summary,
         status="succeeded",
+        ended_at=utcnow(),
         results_s3=f"s3://{bucket}/evals/{ev['id']}/results.jsonl",
     )
     ctx.log(f"eval summary {summary}")
@@ -283,7 +283,35 @@ def stage_eval(ctx: StageContext) -> None:
 
 def _eval_done(target: str, status: str, error: str | None) -> None:
     if status != "succeeded":
-        _save(Eval, target, status="failed", error=error)
+        _save(Eval, target, status="failed", error=error, ended_at=utcnow())
 
 
-register("eval.run", [Stage("evaluate", stage_eval)], on_finish=_eval_done)
+def stage_eval_observability(ctx: StageContext) -> None:
+    """Trace recording only: Transaction Search must be on in the Region (the operator
+    confirms that in the console), then the eval-only OTEL runtime is found or deployed."""
+    ev = _get(Eval, ctx.target_id)
+    if not ev.get("observe"):
+        return
+    from ..services import observability as obs
+    from . import agent as pagent
+
+    with session_scope() as s:
+        region = s.get(AgentRuntime, ev["agent_runtime_id"]).region
+    state = obs.transaction_search_status(region)["transaction_search"]
+    if state == "off":
+        raise AppError(
+            "eval.observability_off",
+            f"CloudWatch Transaction Search is off in {region}",
+            status=409,
+            detail={"region": region},
+        )
+    _save(Eval, ev["id"], status="preparing")
+    arn = pagent.ensure_obs_runtime(ctx, ev["agent_runtime_id"])
+    _save(Eval, ev["id"], obs_runtime_arn=arn)
+
+
+register(
+    "eval.run",
+    [Stage("observability", stage_eval_observability), Stage("evaluate", stage_eval)],
+    on_finish=_eval_done,
+)

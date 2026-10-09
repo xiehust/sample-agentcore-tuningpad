@@ -451,6 +451,30 @@ def resolve_platform_version(region: str, requested: str | None) -> str:
     return choice
 
 
+def obs_runtime_name(base: str) -> str:
+    """The eval-only OTEL runtime next to a training runtime (`<base>_obs`, ≤ 48 chars)."""
+    return f"{base[:44]}_obs"
+
+
+def obs_environment(name: str) -> dict[str, str]:
+    """Runtime env of the eval-only runtime. The template entrypoint (tp_entry.sh) starts
+    `opentelemetry-instrument` only when TP_OBSERVABILITY=1; training runtimes never get
+    these, so their process is unchanged. ADOT fills in the OTLP exporters/endpoints from
+    AGENT_OBSERVABILITY_ENABLED; content stays on the spans (not a separate logs pipeline)
+    so the trace view reads one source."""
+    return {
+        "TP_OBSERVABILITY": "1",
+        "AGENT_OBSERVABILITY_ENABLED": "true",
+        "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT": "true",
+        # split delivery (aws/spans): unified delivery, the default for runtimes created after
+        # 2026-07-20, needs logs:PutResourcePolicy on the agent execution role
+        "UNIFIED_TRACES_DESTINATION_ENABLED": "false",
+        "OTEL_PYTHON_DISTRO": "aws_distro",
+        "OTEL_PYTHON_CONFIGURATOR": "aws_configurator",
+        "OTEL_RESOURCE_ATTRIBUTES": f"service.name={name}",
+    }
+
+
 def deploy_runtime(
     region: str,
     name: str,
@@ -459,6 +483,7 @@ def deploy_runtime(
     network: dict[str, Any],
     runtime_id: str | None = None,
     platform_version: str = "V1",
+    environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
     ctl = aws.client("bedrock-agentcore-control", region)
     common = {
@@ -471,6 +496,8 @@ def deploy_runtime(
         # always explicit: an omitted value on update keeps the runtime's current version
         "platformVersion": platform_version,
     }
+    if environment:  # eval-only OTEL runtime; training runtimes pass none
+        common["environmentVariables"] = environment
     existing = {"agentRuntimeId": runtime_id} if runtime_id else find_runtime(region, name)
     if existing:
         r = ctl.update_agent_runtime(agentRuntimeId=existing["agentRuntimeId"], **common)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from ..core.db import new_id, session_scope
@@ -10,6 +10,7 @@ from ..core.errors import AppError, NotFound
 from ..jobs.engine import get_engine, job_view, latest_job
 from ..models import Eval, Export, InferenceEndpoint, Run
 from ..pipelines import cluster as pc
+from ..services import evals as esvc
 
 exports = APIRouter(prefix="/api/exports", tags=["exports"])
 endpoints = APIRouter(prefix="/api/inference", tags=["inference"])
@@ -142,10 +143,29 @@ class EvalBody(BaseModel):
     limit: int = Field(200, ge=1, le=20000)
     # per-turn overrides (max_tokens, temperature, top_p, top_k); default: the run's val settings
     sampling_params: dict[str, float | int] | None = None
+    # record AgentCore traces (waterfall): runs on the eval-only OTEL twin of the runtime
+    observe: bool = False
 
 
 @evals.post("")
 def create_eval(body: EvalBody):
+    if body.observe:
+        from ..models import AgentRuntime
+        from ..services import observability as obs
+
+        with session_scope() as s:
+            rt = s.get(AgentRuntime, body.agent_runtime_id)
+            if not rt:
+                raise NotFound("runtime.not_found", "agent runtime not found")
+            region = rt.region
+        # fail before creating the eval: the console asks to enable it (account-level)
+        if obs.transaction_search_status(region)["transaction_search"] == "off":
+            raise AppError(
+                "eval.observability_off",
+                f"CloudWatch Transaction Search is off in {region}",
+                status=409,
+                detail={"region": region},
+            )
     eid = new_id("ev")
     with session_scope() as s:
         s.add(
@@ -159,7 +179,30 @@ def create_eval(body: EvalBody):
                 limit=body.limit,
                 status="queued",
                 summary={},
+                observe=body.observe,
             )
         )
     payload = {"sampling_params": body.sampling_params} if body.sampling_params else {}
     return {"id": eid, "job_id": get_engine().start("eval.run", eid, payload)}
+
+
+@evals.get("/{eval_id}/samples")
+def eval_samples(
+    eval_id: str,
+    status: str = Query("all", pattern="^(all|failed|truncated)$"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=esvc.PAGE_MAX),
+):
+    return esvc.list_samples(eval_id, status, offset, limit)
+
+
+@evals.get("/{eval_id}/samples/{index}")
+def eval_sample(eval_id: str, index: int):
+    return esvc.sample_detail(eval_id, index)
+
+
+@evals.get("/{eval_id}/samples/{index}/trace")
+def eval_sample_trace(eval_id: str, index: int, force: bool = False):
+    from ..services import observability as obs
+
+    return obs.sample_trace(eval_id, index, force)

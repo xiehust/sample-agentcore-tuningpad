@@ -609,6 +609,12 @@ def stage_delete_runtimes(ctx: StageContext) -> None:
             for r in s.query(AgentRuntime).filter(AgentRuntime.cluster_id == c["id"])
             if r.runtime_id and r.status != "deleted"
         ]
+        # eval-only OTEL twins sit in the same subnets (same ENI problem)
+        rts += [
+            (f"{r.id}:obs", r.obs["runtime_id"])
+            for r in s.query(AgentRuntime).filter(AgentRuntime.cluster_id == c["id"])
+            if (r.obs or {}).get("runtime_id")
+        ]
     for row_id, rid in rts:
         if (ctx.context.get("runtimes_deleted") or {}).get(row_id):
             continue  # deleting an already-deleted runtime returns AccessDenied, not NotFound

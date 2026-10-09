@@ -19,7 +19,7 @@ section "local lifecycle · syntax"
 (cd "$ROOT/backend" && uv run ruff check ../start.py && python3 -m py_compile ../start.py && bash -n ../stop.sh); result $? "lifecycle"
 
 section "cluster assets · shell syntax"
-(shopt -s nullglob; for f in "$ROOT"/cluster_assets/*.sh "$ROOT"/trainer_image/*.sh; do bash -n "$f" || exit 1; done); result $? "bash -n"
+(shopt -s nullglob; for f in "$ROOT"/cluster_assets/*.sh "$ROOT"/trainer_image/*.sh "$ROOT"/templates/*/agent/*.sh; do bash -n "$f" || exit 1; done); result $? "bash -n"
 
 section "frontend · eslint"
 (cd "$ROOT/frontend" && npm run --silent lint); result $? "eslint"

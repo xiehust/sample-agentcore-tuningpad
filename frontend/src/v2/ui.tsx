@@ -915,7 +915,7 @@ export function Pager({
   const { t } = useTranslation();
   return (
     <div className="v2-pager">
-      <span>{t("v2.common.total", { count: total })}</span>
+      <span>{t("v2.common.total", { count: total, n: total })}</span>
       <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>
         {t("v2.common.prevPage")}
       </button>
@@ -1003,6 +1003,7 @@ export function Drawer({
   open,
   onClose,
   footer,
+  wide,
   children,
   testId,
 }: {
@@ -1010,12 +1011,13 @@ export function Drawer({
   open: boolean;
   onClose: () => void;
   footer?: ReactNode;
+  wide?: boolean;
   children: ReactNode;
   testId?: string;
 }) {
   if (!open) return null;
   return (
-    <DrawerFrame title={title} onClose={onClose} footer={footer} testId={testId}>
+    <DrawerFrame title={title} onClose={onClose} footer={footer} wide={wide} testId={testId}>
       {children}
     </DrawerFrame>
   );
@@ -1025,12 +1027,14 @@ function DrawerFrame({
   title,
   onClose,
   footer,
+  wide,
   children,
   testId,
 }: {
   title: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
+  wide?: boolean;
   children: ReactNode;
   testId?: string;
 }) {
@@ -1038,7 +1042,7 @@ function DrawerFrame({
   useEscape(onClose);
   return (
     <div className="v2-mask drawer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="v2-drawer" role="dialog" aria-modal="true" data-testid={testId}>
+      <div className={wide ? "v2-drawer wide" : "v2-drawer"} role="dialog" aria-modal="true" data-testid={testId}>
         <div className="v2-modal-head">
           {title}
           <button type="button" onClick={onClose} aria-label={t("v2.common.close")}>

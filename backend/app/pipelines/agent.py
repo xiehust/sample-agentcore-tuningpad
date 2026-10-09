@@ -144,7 +144,9 @@ register("agent.import", [Stage("inspect", stage_import)], on_finish=_built)
 # ---------------- deploy + smoke ----------------
 
 
-def smoke_payloads(agent: dict[str, Any], override: list[dict] | None) -> list[dict]:
+def smoke_payloads(
+    agent: dict[str, Any], override: list[dict] | None, region: str | None = None
+) -> list[dict]:
     if override:
         return override
     if agent["config"].get("smoke_payloads"):
@@ -153,17 +155,114 @@ def smoke_payloads(agent: dict[str, Any], override: list[dict] | None) -> list[d
         t = get_template(agent["template_id"])
         if t.get("smoke_payloads"):
             return t["smoke_payloads"]
-        # data-driven templates (OfficeBench): take two rows of the generated dataset
+        # data-driven templates (OfficeBench): take two rows of the generated dataset — in
+        # the runtime's Region: its role reads only that Region's bucket (the payload is S3
+        # URIs), so a newer dataset elsewhere fails the smoke with AccessDenied
         with session_scope() as s:
-            ds = (
-                s.query(Dataset)
-                .filter(Dataset.template_id == agent["template_id"], Dataset.status == "ready")
-                .order_by(Dataset.created_at.desc())
-                .first()
+            q = s.query(Dataset).filter(
+                Dataset.template_id == agent["template_id"], Dataset.status == "ready"
             )
+            if region:
+                q = q.filter(Dataset.region == region)
+            ds = q.order_by(Dataset.created_at.desc()).first()
             if ds and ds.sample:
                 return [row["payload"] for row in ds.sample[:2]]
     return []
+
+
+def runtime_network(rt: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """(networkConfiguration, runtime-name suffix) for a runtime row."""
+    if rt["network_mode"] != "VPC":
+        return svc.network_config("PUBLIC"), "smoke"
+    from ..pipelines.cluster import load as load_cluster
+
+    c = load_cluster(rt["cluster_id"])
+    net = c["network"]
+    if not net.get("sg_acr"):
+        raise AppError(
+            "agent.cluster_not_ready",
+            "cluster security groups are not installed yet (repair the cluster)",
+        )
+    return svc.network_config("VPC", net.get("private_subnets"), [net["sg_acr"]]), c["name"]
+
+
+def deploy_and_wait(
+    ctx: StageContext,
+    *,
+    region: str,
+    name: str,
+    image_uri: str,
+    role_arn: str,
+    network: dict[str, Any],
+    vpc: bool,
+    platform: str,
+    existing_id: str | None,
+    on_ids,
+    on_ready,
+    environment: dict[str, str] | None = None,
+) -> None:
+    """Create/update one AgentCore runtime and wait for READY: waits out an in-progress
+    runtime first (ConflictException otherwise) and, in VPC mode, retries once with only the
+    subnets in AgentCore-supported AZs. `on_ids(out)` persists the runtime id/arn as soon as
+    they exist, `on_ready(info)` the version AgentCore applied."""
+    ready_timeout = svc.READY_TIMEOUT_S[platform]
+    existing_id = existing_id or (svc.find_runtime(region, name) or {}).get("agentRuntimeId")
+    if existing_id:
+        # an update while CREATING/UPDATING returns ConflictException (V2 stays there minutes)
+        ctx.wait_until(
+            lambda: not svc.runtime_busy(svc.runtime_status(region, existing_id)[0]),
+            timeout_s=ready_timeout,
+            interval_s=10,
+            what="runtime to leave its in-progress state",
+        )
+    ctx.log(f"platform version {platform}")
+    env = {"environment": environment} if environment else {}
+    out = svc.deploy_runtime(
+        region, name, image_uri, role_arn, network, existing_id, platform, **env
+    )
+    on_ids(out)
+    save_ids = dict(out)
+    ctx.log(f"runtime {name}: {out}")
+
+    def ready():
+        info = svc.runtime_info(region, save_ids["runtime_id"])
+        status, reason = info["status"], info["reason"]
+        ctx.detail(status)
+        if "FAILED" in status:
+            raise AppError(
+                "agent.runtime_failed", f"runtime {status}: {reason}", detail={"reason": reason}
+            )
+        if status == "READY":
+            on_ready(info)
+            return True
+        return False
+
+    try:
+        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
+    except AppError as e:
+        supported = svc.supported_az_ids((e.detail or {}).get("reason") or "")
+        if not vpc or not supported:
+            raise
+        # AgentCore VPC mode is offered in a subset of AZs: keep only those subnets
+        subnets = svc.subnets_in_azs(region, network["networkModeConfig"]["subnets"], supported)
+        if not subnets:
+            raise AppError(
+                "agent.no_supported_subnet",
+                f"no cluster subnet in an AgentCore-supported AZ {supported}",
+            ) from e
+        ctx.log(f"retrying with subnets in supported AZs {supported}: {subnets}")
+        svc.delete_runtime(region, out["runtime_id"])
+        ctx.wait_until(
+            lambda: svc.find_runtime(region, name) is None,
+            timeout_s=300,
+            interval_s=10,
+            what="failed runtime deletion",
+        )
+        network = svc.network_config("VPC", subnets, network["networkModeConfig"]["securityGroups"])
+        out = svc.deploy_runtime(region, name, image_uri, role_arn, network, None, platform, **env)
+        on_ids(out)
+        save_ids.update(out)
+        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
 
 
 def stage_deploy(ctx: StageContext) -> None:
@@ -172,106 +271,97 @@ def stage_deploy(ctx: StageContext) -> None:
     if not agent["image_uri"] or agent["status"] != "ready":
         raise AppError("agent.not_built", "build or import the agent image first")
     res = proj.require_region(rt["region"])
-    if rt["network_mode"] == "VPC":
-        from ..pipelines.cluster import load as load_cluster
-
-        c = load_cluster(rt["cluster_id"])
-        net = c["network"]
-        if not net.get("sg_acr"):
-            raise AppError(
-                "agent.cluster_not_ready",
-                "cluster security groups are not installed yet (repair the cluster)",
-            )
-        network = svc.network_config("VPC", net.get("private_subnets"), [net["sg_acr"]])
-        suffix = c["name"]
-    else:
-        network = svc.network_config("PUBLIC")
-        suffix = "smoke"
-    name = svc.runtime_name(agent["name"], suffix)
+    network, suffix = runtime_network(rt)
     platform = svc.resolve_platform_version(
         rt["region"], ctx.payload.get("platform_version") or rt["platform_version"]
     )
-    ready_timeout = svc.READY_TIMEOUT_S[platform]
-    existing_id = rt["runtime_id"] or (svc.find_runtime(rt["region"], name) or {}).get(
-        "agentRuntimeId"
-    )
-    if existing_id:
-        # an update while CREATING/UPDATING returns ConflictException (V2 stays there minutes)
-        ctx.wait_until(
-            lambda: not svc.runtime_busy(svc.runtime_status(rt["region"], existing_id)[0]),
-            timeout_s=ready_timeout,
-            interval_s=10,
-            what="runtime to leave its in-progress state",
-        )
-    ctx.log(f"platform version {platform}")
-    out = svc.deploy_runtime(
-        rt["region"],
-        name,
-        agent["image_uri"],
-        res["acr_role_arn"],
-        network,
-        existing_id,
-        platform,
-    )
-    save_runtime(
-        rt["id"],
-        status="deploying",
-        image_uri=agent["image_uri"],
-        platform_version=platform,
-        **out,
-    )
-    save_ids = dict(out)
-    ctx.log(f"runtime {name}: {out}")
+    first = {"done": False}
 
-    def ready():
-        info = svc.runtime_info(rt["region"], save_ids["runtime_id"])
-        status, reason = info["status"], info["reason"]
-        ctx.detail(status)
-        if "FAILED" in status:
-            raise AppError(
-                "agent.runtime_failed", f"runtime {status}: {reason}", detail={"reason": reason}
+    def on_ids(out: dict[str, str]) -> None:
+        if not first["done"]:  # the first save also marks the row as deploying
+            first["done"] = True
+            save_runtime(
+                rt["id"],
+                status="deploying",
+                image_uri=agent["image_uri"],
+                platform_version=platform,
+                **out,
             )
-        if status == "READY":
-            save_runtime(rt["id"], platform_version=info["platform_version"])
-            return True
-        return False
+        else:
+            save_runtime(rt["id"], **out)
 
+    deploy_and_wait(
+        ctx,
+        region=rt["region"],
+        name=svc.runtime_name(agent["name"], suffix),
+        image_uri=agent["image_uri"],
+        role_arn=res["acr_role_arn"],
+        network=network,
+        vpc=rt["network_mode"] == "VPC",
+        platform=platform,
+        existing_id=rt["runtime_id"],
+        on_ids=on_ids,
+        on_ready=lambda info: save_runtime(rt["id"], platform_version=info["platform_version"]),
+    )
+
+
+def save_obs(rt_id: str, **fields: Any) -> None:
+    with session_scope() as s:
+        r = s.get(AgentRuntime, rt_id)
+        if r:
+            r.obs = {**(r.obs or {}), **fields}
+
+
+def ensure_obs_runtime(ctx: StageContext, rt_id: str) -> str:
+    """The eval-only OTEL twin of a training runtime: same image, role and network, plus
+    `obs_environment`. Reused while READY on the training runtime's image, updated when the
+    image moved, created on first use. Returns its ARN. No contract smoke: the image is the
+    one the training runtime already passed with."""
+    rt = load_runtime(rt_id)
+    if rt["status"] != "ready" or not rt["image_uri"] or rt["network_mode"] != "VPC":
+        raise AppError("eval.runtime", "the agent runtime must be ready and deployed to a cluster")
+    with session_scope() as s:
+        obs = dict(s.get(AgentRuntime, rt_id).obs or {})
+    if (
+        obs.get("status") == "ready"
+        and obs.get("image_uri") == rt["image_uri"]
+        and obs.get("runtime_arn")
+    ):
+        ctx.log(f"eval trace runtime {obs['runtime_id']} is up to date")
+        return obs["runtime_arn"]
+    agent = load_agent(rt["agent_id"])
+    res = proj.require_region(rt["region"])
+    network, suffix = runtime_network(rt)
+    name = svc.obs_runtime_name(svc.runtime_name(agent["name"], suffix))
+    platform = rt["platform_version"] or "V1"  # same platform as the training twin
+    save_obs(rt_id, status="deploying", image_uri=rt["image_uri"], error=None)
     try:
-        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
-    except AppError as e:
-        supported = svc.supported_az_ids((e.detail or {}).get("reason") or "")
-        if rt["network_mode"] != "VPC" or not supported:
-            raise
-        # AgentCore VPC mode is offered in a subset of AZs: keep only those subnets
-        subnets = svc.subnets_in_azs(
-            rt["region"], network["networkModeConfig"]["subnets"], supported
+        deploy_and_wait(
+            ctx,
+            region=rt["region"],
+            name=name,
+            image_uri=rt["image_uri"],
+            role_arn=res["acr_role_arn"],
+            network=network,
+            vpc=True,
+            platform=platform,
+            existing_id=obs.get("runtime_id"),
+            on_ids=lambda out: save_obs(rt_id, **out),
+            on_ready=lambda info: save_obs(rt_id, platform_version=info["platform_version"]),
+            environment=svc.obs_environment(name),
         )
-        if not subnets:
-            raise AppError(
-                "agent.no_supported_subnet",
-                f"no cluster subnet in an AgentCore-supported AZ {supported}",
-            ) from e
-        ctx.log(f"retrying with subnets in supported AZs {supported}: {subnets}")
-        svc.delete_runtime(rt["region"], out["runtime_id"])
-        ctx.wait_until(
-            lambda: svc.find_runtime(rt["region"], name) is None,
-            timeout_s=300,
-            interval_s=10,
-            what="failed runtime deletion",
-        )
-        network = svc.network_config("VPC", subnets, network["networkModeConfig"]["securityGroups"])
-        out = svc.deploy_runtime(
-            rt["region"], name, agent["image_uri"], res["acr_role_arn"], network, None, platform
-        )
-        save_runtime(rt["id"], **out)
-        save_ids.update(out)
-        ctx.wait_until(ready, timeout_s=ready_timeout, interval_s=10, what="runtime READY")
+    except Exception as e:
+        save_obs(rt_id, status="failed", error=str(e)[:500])
+        raise
+    save_obs(rt_id, status="ready")
+    with session_scope() as s:
+        return s.get(AgentRuntime, rt_id).obs["runtime_arn"]
 
 
 def stage_smoke(ctx: StageContext) -> None:
     rt = load_runtime(ctx.target_id)
     agent = load_agent(rt["agent_id"])
-    payloads = smoke_payloads(agent, ctx.payload.get("smoke_payloads"))
+    payloads = smoke_payloads(agent, ctx.payload.get("smoke_payloads"), rt["region"])
     if ctx.payload.get("skip_smoke"):
         ctx.log("smoke skipped by request")
         return

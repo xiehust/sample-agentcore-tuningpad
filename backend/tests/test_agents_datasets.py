@@ -42,6 +42,9 @@ def test_template_context_contains_config_and_toolkit_files(monkeypatch, tmp_pat
     ctx = svc.prepare_context(agent)
     names = {p.name for p in ctx.iterdir()}
     assert {"rl_app.py", "reward.py", "models.py", "Dockerfile", "tp_config.json"} <= names
+    # entrypoint: ADOT only for the eval-only runtime (TP_OBSERVABILITY=1)
+    assert "tp_entry.sh" in names and "tp_entry.sh" in (ctx / "Dockerfile").read_text()
+    assert "exec python -m rl_app" in (ctx / "tp_entry.sh").read_text()
     cfg = json.loads((ctx / "tp_config.json").read_text())
     assert cfg["reward_method"] == "flexible"
     checks = svc.static_checks(ctx)
@@ -190,6 +193,36 @@ def test_smoke_payloads_precedence():
     assert pa.smoke_payloads(agent, [{"prompt": "x"}]) == [{"prompt": "x"}]
     custom = {"source": "upload", "template_id": None, "config": {"smoke_payloads": [{"a": 1}]}}
     assert pa.smoke_payloads(custom, None) == [{"a": 1}]
+
+
+def test_data_driven_smoke_uses_the_runtimes_region():
+    """OfficeBench payloads are S3 URIs the runtime role can read only in its own Region:
+    a newer dataset in another Region must not be picked (AccessDenied in the smoke)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.db import session_scope
+    from app.models import Dataset
+
+    now = datetime.now(UTC)
+    with session_scope() as s:
+        for did, region, age in (("ds-e1", "us-east-1", 2), ("ds-e2", "us-east-2", 1)):
+            s.add(
+                Dataset(
+                    id=did,
+                    name=did,
+                    region=region,
+                    source="builtin:officebench",
+                    template_id="officebench",
+                    status="ready",
+                    splits={},
+                    sample=[{"payload": {"task_uri": f"s3://{region}/t"}}] * 2,
+                    stats={},
+                    created_at=now - timedelta(hours=age),
+                )
+            )
+    agent = {"source": "template", "template_id": "officebench", "config": {}}
+    assert pa.smoke_payloads(agent, None, "us-east-1")[0]["task_uri"] == "s3://us-east-1/t"
+    assert pa.smoke_payloads(agent, None)[0]["task_uri"] == "s3://us-east-2/t"  # newest overall
 
 
 def test_agent_create_validation(client):
@@ -477,3 +510,125 @@ def test_init_db_adds_new_nullable_columns(tmp_path):
     cols = {c["name"] for c in sa.inspect(sa.create_engine(url)).get_columns("agent_runtimes")}
     assert {"platform_version", "runtime_arn", "cluster_id"} <= cols
     assert "last_smoke" not in cols  # NOT NULL columns are never added in place
+
+
+# ---------------- eval-only OTEL twin (trace recording) ----------------
+
+
+def _seed_vpc_runtime(image="img:1"):
+    from app.core.db import session_scope
+    from app.models import Agent, AgentRuntime, Cluster
+
+    with session_scope() as s:
+        s.add(
+            Cluster(
+                id="cl-1",
+                name="dev",
+                region="us-east-1",
+                source="create",
+                status="ready",
+                network={"private_subnets": ["subnet-a"], "sg_acr": "sg-acr"},
+                components={},
+                params={},
+            )
+        )
+        s.add(
+            Agent(
+                id="ag-1", name="ob", source="template", config={}, image_uri=image, status="ready"
+            )
+        )
+        s.flush()
+        s.add(
+            AgentRuntime(
+                id="rt-1",
+                agent_id="ag-1",
+                cluster_id="cl-1",
+                region="us-east-1",
+                network_mode="VPC",
+                runtime_id="tr-1",
+                runtime_arn="arn:train",
+                image_uri=image,
+                platform_version="V2",
+                status="ready",
+            )
+        )
+
+
+def test_training_deploy_sends_no_environment(stub_aws):
+    from tests.conftest import StubClient
+
+    ctl = StubClient(
+        list_agent_runtimes={"agentRuntimes": []},
+        create_agent_runtime={"agentRuntimeId": "rt-1", "agentRuntimeArn": "arn:rt-1"},
+    )
+    stub_aws({"bedrock-agentcore-control": ctl})
+    svc.deploy_runtime("us-east-1", "n", "img", "role", svc.network_config("PUBLIC"))
+    (_, create) = next(c for c in ctl.calls if c[0] == "create_agent_runtime")
+    assert "environmentVariables" not in create  # training runtimes: process unchanged
+
+
+def test_obs_runtime_created_reused_and_updated_on_new_image(stub_aws, monkeypatch):
+    from tests.conftest import StubClient
+
+    monkeypatch.setattr(pa.proj, "require_region", lambda r: {"acr_role_arn": "arn:role"})
+    _seed_vpc_runtime()
+    ctl = StubClient(
+        list_agent_runtimes={"agentRuntimes": []},
+        create_agent_runtime={"agentRuntimeId": "ob-1", "agentRuntimeArn": "arn:obs"},
+        update_agent_runtime={"agentRuntimeId": "ob-1", "agentRuntimeArn": "arn:obs"},
+        get_agent_runtime={"status": "READY", "platformVersion": "V2"},
+    )
+    stub_aws({"bedrock-agentcore-control": ctl})
+    assert pa.ensure_obs_runtime(_Ctx("ev-1", {}), "rt-1") == "arn:obs"
+    (_, create) = next(c for c in ctl.calls if c[0] == "create_agent_runtime")
+    assert create["agentRuntimeName"] == "tp_ob_dev_obs"
+    env = create["environmentVariables"]
+    assert env["TP_OBSERVABILITY"] == "1" and env["AGENT_OBSERVABILITY_ENABLED"] == "true"
+    assert env["AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"] == "true"
+    assert env["UNIFIED_TRACES_DESTINATION_ENABLED"] == "false"  # aws/spans, no role change
+    assert create["platformVersion"] == "V2"  # same platform as the training twin
+    assert create["networkConfiguration"]["networkModeConfig"]["securityGroups"] == ["sg-acr"]
+    # training runtime row untouched
+    assert pa.load_runtime("rt-1")["runtime_arn"] == "arn:train"
+
+    n = len(ctl.calls)
+    assert pa.ensure_obs_runtime(_Ctx("ev-2", {}), "rt-1") == "arn:obs"
+    assert len(ctl.calls) == n  # READY on the same image: reused, no AWS call
+
+    pa.save_runtime("rt-1", image_uri="img:2")  # agent rebuilt → twin is stale
+    pa.ensure_obs_runtime(_Ctx("ev-3", {}), "rt-1")
+    upd = next(kw for name, kw in ctl.calls[n:] if name == "update_agent_runtime")
+    assert upd["agentRuntimeId"] == "ob-1" and upd["agentRuntimeArtifact"] == {
+        "containerConfiguration": {"containerUri": "img:2"}
+    }
+
+
+def test_observed_eval_needs_transaction_search(client, stub_aws, monkeypatch):
+    from tests.conftest import StubClient
+
+    _seed_vpc_runtime()
+    xray = StubClient(get_trace_segment_destination={"Destination": "XRay", "Status": "ACTIVE"})
+    stub_aws({"xray": xray})
+    body = {
+        "name": "e",
+        "endpoint_id": "ep-x",
+        "agent_runtime_id": "rt-1",
+        "dataset_id": "ds-x",
+        "observe": True,
+    }
+    r = client.post("/api/evals", json=body)
+    assert r.status_code == 409 and r.json()["code"] == "eval.observability_off"
+    assert r.json()["detail"] == {"region": "us-east-1"}
+    assert client.get("/api/evals").json() == []  # nothing created
+
+
+def test_deleting_runtime_deletes_its_obs_twin(client, stub_aws):
+    from tests.conftest import StubClient
+
+    _seed_vpc_runtime()
+    pa.save_obs("rt-1", runtime_id="ob-1", status="ready")
+    ctl = StubClient(delete_agent_runtime={})
+    stub_aws({"bedrock-agentcore-control": ctl})
+    assert client.delete("/api/agents/ag-1/runtimes/rt-1").json() == {"ok": True}
+    deleted = [kw["agentRuntimeId"] for name, kw in ctl.calls if name == "delete_agent_runtime"]
+    assert deleted == ["tr-1", "ob-1"]

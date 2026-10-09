@@ -15,11 +15,13 @@ RUN git clone https://github.com/zlwang-cs/OfficeBench.git /tmp/officebench \
 RUN mkdir -p /testbed/data /testbed/calendar /testbed/emails
 COPY dist/agentcore_rl_toolkit-*.whl /tmp/
 RUN uv pip install /tmp/agentcore_rl_toolkit-*.whl \
-      "strands-agents[openai]==1.18.0" "strands-agents-tools==0.2.16" python-dotenv \
+      "strands-agents[openai,otel]==1.18.0" "strands-agents-tools==0.2.16" python-dotenv \
+      "aws-opentelemetry-distro==0.21.0" \
       openpyxl python-docx PyMuPDF pdf2docx pytesseract icalendar Pillow pytz fire \
     && rm -f /tmp/*.whl
-COPY rl_app.py reward.py models.py utils.py tools.py /app/
+COPY rl_app.py reward.py models.py utils.py tools.py tp_entry.sh /app/
 RUN useradd -m -u 1000 bedrock_agentcore && chown -R bedrock_agentcore:bedrock_agentcore /testbed /app
 USER bedrock_agentcore
 EXPOSE 8080
-CMD ["python", "-m", "rl_app"]
+# ADOT only when TP_OBSERVABILITY=1 (the eval-only runtime); training keeps the plain process
+CMD ["sh", "/app/tp_entry.sh"]

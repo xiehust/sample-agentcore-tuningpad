@@ -286,23 +286,19 @@ def endpoint_state(region: str, eks: str, endpoint_id: str) -> dict[str, Any]:
 
 
 def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-sample states (`evals.sample_state`, shared with the sample list so
+    the counts always agree). Truncation is scored 0; both failure kinds count as 0 in the
+    overall mean."""
+    from .evals import reward_of, sample_state
+
     rewards, failed, truncated = [], 0, 0
     for it in items:
-        stop = str((it.get("result") or {}).get("stop_reason") or "")
-        if "max_tokens" in stop:
-            # turn budget exhausted: an over-long answer, scored 0 (older agents
-            # report it as a 500 with Strands' MaxTokensReachedException text)
+        state = sample_state(it)
+        if state == "truncated":
             truncated += 1
             rewards.append(0.0)
-            continue
-        if not it.get("success"):
-            failed += 1
-            continue
-        r = (it.get("result") or {}).get("rewards")
-        if isinstance(r, list):
-            r = r[-1] if r else None
-        if isinstance(r, int | float) and not isinstance(r, bool):
-            rewards.append(float(r))
+        elif state == "scored":
+            rewards.append(reward_of(it.get("result")) or 0.0)
         else:
             failed += 1
     n = len(items)

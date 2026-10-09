@@ -41,6 +41,10 @@ def _runtime_view(r: AgentRuntime) -> dict[str, Any]:
         "platform_version": r.platform_version,
         "status": r.status,
         "last_smoke": r.last_smoke or {},
+        # eval-only OTEL twin, if an eval with trace recording deployed one
+        "obs": {k: (r.obs or {}).get(k) for k in ("runtime_id", "status", "error")}
+        if r.obs
+        else None,
         "job": job_view(j) if j else None,
     }
 
@@ -248,6 +252,11 @@ def delete_runtime(agent_id: str, rt_id: str):
         svc.delete_runtime(rt["region"], rt["runtime_id"])
     with session_scope() as s:
         r = s.get(AgentRuntime, rt_id)
+        obs_id = (r.obs or {}).get("runtime_id") if r else None
+    if obs_id:  # the eval-only OTEL twin goes with it
+        svc.delete_runtime(rt["region"], obs_id)
+    with session_scope() as s:
+        r = s.get(AgentRuntime, rt_id)
         if r:
             s.delete(r)
     return {"ok": True}
@@ -258,6 +267,11 @@ def delete_agent(agent_id: str):
     with session_scope() as s:
         rts = s.query(AgentRuntime).filter(AgentRuntime.agent_id == agent_id).all()
         ids = [(r.region, r.runtime_id) for r in rts if r.runtime_id]
+        ids += [
+            (r.region, (r.obs or {}).get("runtime_id"))
+            for r in rts
+            if (r.obs or {}).get("runtime_id")
+        ]
     for region, rid in ids:
         svc.delete_runtime(region, rid)
     with session_scope() as s:

@@ -108,6 +108,10 @@ REQUIRED_ACTIONS = [
     "s3:PutObject",
     "ec2:CreateSecurityGroup",
     "ec2:AuthorizeSecurityGroupIngress",
+    # eval traces: Logs Insights over aws/spans, Transaction Search status
+    "logs:StartQuery",
+    "logs:GetQueryResults",
+    "xray:GetTraceSegmentDestination",
 ]
 
 

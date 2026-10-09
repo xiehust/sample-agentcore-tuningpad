@@ -510,6 +510,8 @@ export interface AgentRuntimeView {
   platform_version: "V1" | "V2" | null;
   status: string;
   last_smoke: { ok?: boolean; passed?: number; total?: number; model_id?: string; results?: { index: number; ok: boolean; rewards?: unknown; error?: string | null }[] };
+  /** Eval-only OTEL twin of this runtime (deployed by the first eval that records traces). */
+  obs?: { runtime_id: string | null; status: string | null; error: string | null } | null;
   job: Job | null;
 }
 
@@ -724,9 +726,115 @@ export interface EvalView {
   status: string;
   summary: { n?: number; scored?: number; failed?: number; truncated?: number; mean_reward?: number | null; mean_reward_scored?: number | null; acr_failed_rate?: number | null };
   results_s3: string | null;
+  /** The eval ran on the eval-only OTEL runtime and recorded AgentCore traces. */
+  observe?: boolean | null;
   error: string | null;
   created_at: string;
   job: Job | null;
+}
+
+export interface CreateEvalBody {
+  name: string;
+  endpoint_id: string;
+  agent_runtime_id: string;
+  dataset_id: string;
+  split: string;
+  limit: number;
+  /** per-turn overrides (max_tokens, temperature, top_p, top_k); default: the run's val settings */
+  sampling_params?: Record<string, number>;
+  /** record AgentCore traces (waterfall) on the eval-only OTEL twin of the runtime */
+  observe?: boolean;
+}
+
+/** Per-sample outcome: `scored` has a reward; a 500 from the agent is `acr_failed`, not scored. */
+export type EvalSampleState = "scored" | "truncated" | "acr_failed" | "invoke_failed";
+export type EvalSampleFilter = "all" | "failed" | "truncated";
+
+export interface EvalSampleRow {
+  index: number;
+  state: EvalSampleState;
+  reward: number | null;
+  status_code: number | null;
+  stop_reason: string | null;
+  error: string | null;
+  turns: number;
+  tool_calls: number;
+  elapsed_s: number | null;
+  session_id: string | null;
+  has_transcript: boolean;
+}
+
+export interface EvalSamples {
+  total: number;
+  counts: Record<EvalSampleState, number>;
+  observe: boolean;
+  samples: EvalSampleRow[];
+}
+
+export type TranscriptBlockType = "text" | "tool_use" | "tool_result" | "reasoning" | "other";
+
+/** One normalized, redacted content block (`text` is JSON for tool_use input). */
+export interface TranscriptBlock {
+  type: TranscriptBlockType;
+  text: string;
+  name?: string;
+  tool_use_id?: string;
+  status?: string;
+  truncated?: boolean;
+}
+
+export interface TranscriptMessage {
+  role: string;
+  blocks: TranscriptBlock[];
+}
+
+export interface EvalSampleDetail extends EvalSampleRow {
+  input: { prompt: string | null; fields: Record<string, string> };
+  messages: TranscriptMessage[];
+  messages_truncated: boolean;
+  traceback: string | null;
+  extra: Record<string, string | number | boolean>;
+}
+
+/** `pending`: spans may still be ingesting; `empty`: nothing to show (see `reason`). */
+export type TraceState = "ready" | "pending" | "empty";
+export type TraceSpanCategory = "agent" | "llm" | "tool" | "other";
+
+/** One span of a sample's trace; offsets/widths are percentages of the trace duration. */
+export interface TraceSpan {
+  span_id: string;
+  parent_id: string | null;
+  trace_id: string;
+  name: string;
+  category: TraceSpanCategory;
+  depth: number;
+  start_ms: number;
+  duration_ms: number;
+  offset_pct: number;
+  width_pct: number;
+  status: "ok" | "error";
+  /** OTEL `exception` events of the span (type, message, stack trace; redacted) */
+  exceptions?: { type: string; message: string; stacktrace: string }[];
+  model: string | null;
+  tool: string | null;
+  tool_status: string | null;
+  tokens: { input: number | null; output: number | null };
+  input_messages: TranscriptMessage[];
+  output_messages: TranscriptMessage[];
+  attributes: Record<string, unknown>;
+}
+
+export interface EvalTrace {
+  state: TraceState;
+  session_id?: string;
+  reason?: "no_session" | "no_spans";
+  trace?: {
+    duration_ms: number;
+    started_at: string;
+    totals: { spans: number; llm_calls: number; tool_calls: number; errors: number; input_tokens: number; output_tokens: number };
+    /** waterfall order: depth-first, children by start time */
+    spans: TraceSpan[];
+  };
 }
 
 export const servingApi = {
@@ -737,8 +845,32 @@ export const servingApi = {
     post<{ id: string; job_id: string }>("/api/inference", body),
   deleteEndpoint: (id: string) => del<{ job_id: string }>(`/api/inference/${id}`),
   evals: () => get<EvalView[]>("/api/evals"),
-  createEval: (body: { name: string; endpoint_id: string; agent_runtime_id: string; dataset_id: string; split: string; limit: number }) =>
-    post<{ id: string; job_id: string }>("/api/evals", body),
+  /** 409 `eval.observability_off` (detail `{region}`) when `observe` needs Transaction Search first. */
+  createEval: (body: CreateEvalBody) => post<{ id: string; job_id: string }>("/api/evals", body),
+  evalSamples: (id: string, opts: { status?: EvalSampleFilter; offset?: number; limit?: number } = {}) =>
+    get<EvalSamples>(`/api/evals/${encodeURIComponent(id)}/samples?${q(opts)}`),
+  evalSample: (id: string, index: number) =>
+    get<EvalSampleDetail>(`/api/evals/${encodeURIComponent(id)}/samples/${index}`),
+  /** `force` skips the backend's 60 s trace cache. */
+  evalSampleTrace: (id: string, index: number, force = false) =>
+    get<EvalTrace>(`/api/evals/${encodeURIComponent(id)}/samples/${index}/trace?${q({ force })}`),
+};
+
+/* ---------- observability (CloudWatch Transaction Search) ---------- */
+
+export type TransactionSearchState = "active" | "pending" | "off";
+
+export interface ObservabilityStatus {
+  region: string;
+  transaction_search: TransactionSearchState;
+  destination: string | null;
+}
+
+export const obsApi = {
+  status: (region: string) => get<ObservabilityStatus>(`/api/observability/status?${q({ region })}`),
+  /** Account-level X-Ray change for the Region: only call after the operator confirmed it. */
+  enableTransactionSearch: (region: string) =>
+    post<ObservabilityStatus>("/api/observability/transaction-search", { region, confirm: true }),
 };
 
 /* ---------- resources / overview ---------- */

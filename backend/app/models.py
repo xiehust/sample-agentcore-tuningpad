@@ -5,7 +5,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .core.db import Base, TimestampMixin
@@ -72,6 +82,10 @@ class AgentRuntime(Base, TimestampMixin):
     platform_version: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(32), default="pending")
     last_smoke: Mapped[dict] = mapped_column(JSON, default=dict)
+    # eval-only OTEL twin (same image + network, TP_OBSERVABILITY=1), deployed on demand by
+    # an eval with trace recording: {runtime_id, runtime_arn, image_uri, status,
+    # platform_version, error}. A column, not a row: (agent_id, cluster_id) is unique.
+    obs: Mapped[dict | None] = mapped_column(JSON)
 
 
 class TrainerImage(Base, TimestampMixin):
@@ -178,6 +192,12 @@ class Eval(Base, TimestampMixin):
     summary: Mapped[dict] = mapped_column(JSON, default=dict)
     results_s3: Mapped[str | None] = mapped_column(String(512))
     error: Mapped[str | None] = mapped_column(Text)
+    # trace (waterfall) recording: run on the eval-only OTEL runtime of agent_runtime_id
+    observe: Mapped[bool | None] = mapped_column(Boolean)
+    obs_runtime_arn: Mapped[str | None] = mapped_column(String(512))
+    # bounds the CloudWatch Logs Insights window of the sample trace queries
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Job(Base, TimestampMixin):
