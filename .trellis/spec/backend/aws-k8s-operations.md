@@ -158,6 +158,50 @@ are stale.
   The gap follows the weights only. None of these is a cause: MTP removal, the fp32→bf16
   cast, the rewritten tokenizer, `generation_config.json`.
 
+## Eval traces (AgentCore observability)
+
+- **Only evals emit spans.** A training runtime never gets OTEL settings. Its eval-only twin
+  `<base[:44]>_obs` (`agents.obs_runtime_name`) has the same image and network, plus
+  `obs_environment()`. The template entrypoint (`tp_entry.sh`) starts
+  `opentelemetry-instrument` only when `TP_OBSERVABILITY=1`, so the training process is
+  unchanged. Verified on 2026-10-09: the `_obs` runtime wrote 283 spans to `aws/spans`, the
+  training runtime 0.
+- `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT=true` keeps prompt and completion content on the
+  spans themselves, so the waterfall reads a single source. Without it, ADOT moves the
+  content into a separate logs pipeline.
+- `UNIFIED_TRACES_DESTINATION_ENABLED=false` keeps split delivery into `aws/spans`. Unified
+  delivery is the default for runtimes created after 2026-07-20, and it needs
+  `logs:PutResourcePolicy` on the agent execution role. The query covers both
+  (`SPANS_SOURCE`).
+- **Transaction Search is account-wide and region-wide.** `enable_transaction_search`
+  refuses to run without `confirm`. The console asks first, after a 409 from the eval
+  create call. Never call the X-Ray destination update from any other path.
+- **The smoke test must pick payloads in the runtime's Region** (`smoke_payloads(region=…)`).
+  OfficeBench payloads are S3 URIs, and the runtime role can read only its own Region's
+  bucket. Taking the newest dataset from another Region fails the smoke with AccessDenied.
+- **Traces are most useful for failed samples.** An ACR failure has no transcript, but its
+  spans replay every LLM and tool call up to the crash (ev-916804751a #1: 66 spans). Spans
+  stay in `aws/spans` for 30 days, so traces remain viewable after the endpoint is deleted.
+
+## Rollout failures (training)
+
+- The toolkit agent loop classifies failed rollouts:
+  - **model:** context limit or `finish_reason=length`. Trained at reward 0.
+  - **transient:** invoke or S3 error, or a 500 with no model turns. Retried once on a
+    fresh session, then dropped.
+  - **agent_error** and **timeout:** dropped.
+
+  In `agentcore_sync` a drop removes only that trajectory, and its siblings still train.
+- Chart the trainer's step-line counters (`training/rollout_failure/total_<class>_<action>`,
+  `drop_fraction`), not the per-rollout `[rollout-failure]` log lines. Ray's driver log
+  dedup (`RAY_DEDUP_LOGS=1`) folds lines that differ only in digits, such as the sid and
+  step, so counts taken from those lines come out low.
+- `RolloutFailureGuardError` means most rollouts are being dropped by a deterministic bug.
+  `stage_monitor` fails the run as `run.rollout_failure_guard` and does not resume from a
+  checkpoint. A resume would replay the same bug and burn another
+  `agentcore_drop_guard_steps` GPU steps. Only the latest attempt's log counts
+  (`ATTEMPT_MARK`).
+
 ## Checkpoints
 
 - verl's `max_actor_ckpt_to_keep` deletes `global_step_N/actor` of rotated-out steps and

@@ -70,6 +70,15 @@ start CodeBuild, or run `start.py` with real credentials without authorization.
 to the mock server for QA. The 5180 console port is selected by project startup,
 not hardcoded in this Vite config. Keep QA artifacts out of tracked source.
 
+Real-data QA is allowed only when the user has approved the live run it reads
+(eval traces AC4, 2026-10-09). On that host, headless snap Chromium
+(`--remote-debugging-port`) binds to `[::1]` on some launches and to
+`127.0.0.1` on others. Check which with `ss -ltnp` before pointing a CDP
+driver at it. To test the zh-CN locale, set `localStorage.i18nextLng` before
+the page loads. Long values (minute-scale time axes, dotted exception class
+names) only show up with real data, so include at least one long-running
+sample.
+
 For affected flows, verify:
 
 1. Initial loading, empty data, failure/retry, and refresh with old data visible;
