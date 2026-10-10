@@ -185,3 +185,11 @@ Not committed or pushed, as scoped. Journal/index recorded manually; automatic c
 ### Status and Next Steps
 
 First batch B1–B4 complete; both tracking tasks remain `in_progress`. Remaining work includes live rollout AC5 (cost approval required), OfficeBench image update verification, toolkit test isolation, historical validation gaps, publication and resource-retention decisions. No AWS/K8s operations were performed.
+
+### Follow-up: publication and remaining evidence
+
+The user subsequently authorized commit/push and continuation. `8889a98` was pushed to TuningPad `origin/main`; the branch was verified synchronized. Earlier “not committed” statements describe the pre-publication checkpoint.
+
+Read-only local ledger/job-log inspection found OfficeBench `run-210c57c0cb` completed three training steps, exported step 3 and ran a downstream eval with failed samples; this is partial validation, not the full preset or the new rollout policy. The same job retried and resumed monitoring across backend restarts, but checkpoint-weight restoration is not proven. Details are in `remaining-evidence.md`.
+
+The next offline batch is planned in child task `10-10-toolkit-test-isolation`: mock S3 before app construction and verify background writes without external networking. It remains planning pending the final implementation review; no sibling files or cloud resources were changed.

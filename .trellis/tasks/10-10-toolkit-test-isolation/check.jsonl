@@ -1,0 +1,2 @@
+{"file":"../agentcore-rl-toolkit/CONTRIBUTING.md","reason":"Check sibling contribution and test requirements; read AGENTS.md directly as required by the PRD."}
+{"file":".trellis/tasks/10-10-toolkit-test-isolation/prd.md","reason":"Verify mock-before-construction, observed background writes and zero external connections."}

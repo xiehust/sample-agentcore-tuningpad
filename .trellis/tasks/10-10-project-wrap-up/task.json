@@ -18,9 +18,11 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "10-10-toolkit-test-isolation"
+  ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：用户最终确认首批 R1a/R4a/R4b；B1–B4 已完成。Playwright CLI mock 双语桌面/窄屏验收、make verify、strict i18n 通过，见 verification.md。用户级安装 Playwright CLI/skill；无项目依赖变更、无云操作、无提交/push。AC2–AC6 与原失败策略 AC5 仍开放，不归档。",
+  "notes": "2026-10-10：首批 B1–B4 已完成并按用户后续授权提交/push（8889a98）；验证见 verification.md。继续只读复核 ledger，R3b/R3e 有部分真实运行证据，详见 remaining-evidence.md。R1b 子任务 10-10-toolkit-test-isolation 保持 planning 等最终方案确认。未修改 toolkit、未操作云资源；其余 AC 仍开放，不归档。",
   "meta": {}
 }
