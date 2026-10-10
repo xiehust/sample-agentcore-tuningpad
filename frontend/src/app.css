@@ -137,6 +137,7 @@
 .v2 .tp-wf-note { margin: 4px 0 0; font-size: 12.5px; }
 .v2 .tp-wf-exc { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .v2 .tp-wf-exc > .v2-alert, .v2 .tp-wf-exc > .v2-pre { width: 100%; }
+.v2 .tp-wf-exc > .v2-alert { overflow-wrap: anywhere; } /* dotted exception class names */
 .v2 .tp-wf-attrs { margin: 0; border: 1px solid var(--v2-line); border-radius: var(--v2-radius); overflow: hidden; font-size: 12.5px; }
 .v2 .tp-wf-attrs > div { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); border-bottom: 1px solid var(--v2-line-2); }
 .v2 .tp-wf-attrs > div:last-child { border-bottom: 0; }

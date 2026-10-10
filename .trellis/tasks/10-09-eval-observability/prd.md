@@ -64,11 +64,20 @@ AgentCore 可观测性（官方文档）
 
 ## Acceptance Criteria
 
-- [ ] AC1（R1）：对历史评测 ev-f6c8fe5d3d 打开详情，列出 11 个样本，状态与 summary 一致（6 打分 / 5 失败）；打开任一成功样本可看到完整多轮对话与工具调用；打开失败样本可看到 stop_reason 与 traceback；接口响应中不含 `api_key`、`_rollout`、`payload`。
-- [ ] AC2（R2）：训练 runtime 的部署参数与镜像入口行为不变（测试断言不设置 `TP_OBSERVABILITY`）；开启调用链的评测会自动创建或复用 `<name>_obs` runtime，且它带有 OTEL 环境变量；未确认时不调用任何 Transaction Search 写接口。
-- [ ] AC3（R3）：用真实 span 样例（fixture）构建的瀑布流树形正确（父子、深度、offset/width、类别、token）；无 span 时返回 pending/unavailable 状态而非 500。
-- [ ] AC4（R2+R3，真实环境，需单独批准费用）：在一个集群上用开启调用链的评测跑 OfficeBench 少量样本，详情页能看到至少一个样本的完整瀑布流（含 LLM 与工具 span、token）；训练 runtime 未出现 span。
-- [ ] AC5（R4）：`make verify` 通过（含 i18n 严格检查）；新增后端测试覆盖样本规范化与脱敏、span 树构建、Transaction Search 开关确认、评测专用 runtime 的创建/复用/更新。
+- [x] AC1（R1）：对历史评测 ev-f6c8fe5d3d 打开详情，列出 11 个样本，状态与 summary 一致（6 打分 / 5 失败）；打开任一成功样本可看到完整多轮对话与工具调用；打开失败样本可看到 stop_reason 与 traceback；接口响应中不含 `api_key`、`_rollout`、`payload`。
+- [x] AC2（R2）：训练 runtime 的部署参数与镜像入口行为不变（测试断言不设置 `TP_OBSERVABILITY`）；开启调用链的评测会自动创建或复用 `<name>_obs` runtime，且它带有 OTEL 环境变量；未确认时不调用任何 Transaction Search 写接口。
+- [x] AC3（R3）：用真实 span 样例（fixture）构建的瀑布流树形正确（父子、深度、offset/width、类别、token）；无 span 时返回 pending/unavailable 状态而非 500。
+- [x] AC4（R2+R3，真实环境，需单独批准费用）：在一个集群上用开启调用链的评测跑 OfficeBench 少量样本，详情页能看到至少一个样本的完整瀑布流（含 LLM 与工具 span、token）；训练 runtime 未出现 span。
+- [x] AC5（R4）：`make verify` 通过（含 i18n 严格检查）；新增后端测试覆盖样本规范化与脱敏、span 树构建、Transaction Search 开关确认、评测专用 runtime 的创建/复用/更新。
+
+## Verification（2026-10-09）
+
+- AC1：真实评测 ev-f6c8fe5d3d：接口与页面都列出 11 个样本（6 打分 / 5 ACR 失败，与 summary 一致）；样本 0 显示 12 条消息、7 次工具调用；样本 3 显示 HTTP 500 与 traceback；接口响应无 `api_key` / `_rollout` / `result_key`。截图 `.run/eval-sample0-en-tools.png`、`.run/eval-sample3-zh.png`。
+- AC2：训练 runtime（新镜像）冒烟 2/2，未设 `TP_OBSERVABILITY`；`tp_officebench_rl_dev_ue_1_obs`（V2）首次由探针部署，端到端评测里 observability 阶段日志 “is up to date” 直接复用；测试覆盖创建 / 复用 / 镜像变化更新 / 删除联动 / 未确认不写。
+- AC3：手写 Strands 形状 fixture 与真实 `aws/spans` 记录（`tests/fixtures/strands_officebench_spans.json`）两套回归测试；pending / empty / 502 / 404 状态有测试。
+- AC4：rl-dev-ue-1，g6.2xlarge 上的 Qwen3.5-4B 推理端点（g5 按需当日无容量），评测 ev-916804751a（observe=true，4 个 OfficeBench 样本，6 分钟）。3 个样本拿到调用链：#0 打分（46 span，10 次 LLM、9 次工具）；#1 ACR 失败（IndexError，66 span，崩溃前的完整调用可回放）；#2 ACR 失败（110 span、23 次 LLM、30.3 万输入 token，`invoke_agent` 带 `EventLoopException` 上下文超限）。`aws/spans` 中 `_obs` runtime 共 283 个 span，训练 runtime 的 `service.name` 为 0。浏览器截图 `.run/eval-trace-real-en.png`、`.run/eval-trace-real-zh.png`。验收中发现并修复：时间轴标签在分钟级 trace 上重叠（只标 0/50/100%）、长异常类名溢出告警框。
+- AC5：`make verify` PASS（ruff、pytest 205、shell 语法含模板入口脚本、eslint、build、i18n 严格）。
+- 费用：本任务真实环境部分主要为 CodeBuild（一次 OfficeBench 镜像构建）、g6.2xlarge 约 25 分钟（约 $0.4）、Bedrock 冒烟少量调用；无 GPU 训练实例。结束后推理端点已删除，g5 / g6 节点组已缩到 0；评测专用 runtime 保留（闲置不计费）以便复用。
 
 ## Out of Scope
 

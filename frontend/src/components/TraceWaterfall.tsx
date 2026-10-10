@@ -9,7 +9,10 @@ import { Alert, Button, Card, Descriptions, LinkButton, Spin, Tag, type TagTone 
 import { Messages } from "./Transcript";
 
 const CATEGORIES: TraceSpanCategory[] = ["agent", "llm", "tool", "other"];
-const TICKS = [0, 25, 50, 75, 100];
+// labelled ticks (gridlines at every 25% come from CSS): the axis column is ~200px wide, so
+// "4m 09s"-style labels at all five gridlines overlap on long traces (real OfficeBench
+// rollouts run for minutes)
+const LABEL_TICKS = [0, 50, 100];
 const MAX_INDENT_DEPTH = 8;
 const INDENT_PX = 14;
 const MIN_BAR_PCT = 0.4;
@@ -82,7 +85,7 @@ function Waterfall({
       <div className="tp-wf-row tp-wf-head" aria-hidden="true">
         <span>{t("evals.trace.colSpan")}</span>
         <span className="tp-wf-axis">
-          {TICKS.map((p) => (
+          {LABEL_TICKS.map((p) => (
             <span key={p} style={{ left: `${p}%` }}>{millis((trace.duration_ms * p) / 100)}</span>
           ))}
         </span>
