@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { api, type Job } from "../lib/api";
+import { api, localizedMessage, type Job } from "../lib/api";
 import { LIVE_JOB, useJob } from "../lib/useJob";
 import { DETAIL_POLL_MS, usePoll } from "../lib/poll";
 import { duration } from "../lib/format";
@@ -89,6 +89,7 @@ export function JobPanel({
   const [busy, setBusy] = useState(false);
   if (error) return <Alert tone="error">{error}</Alert>;
   if (!job) return null;
+  const jobError = job.error_code && job.error ? localizedMessage(job.error_code, job.error) : job.error;
   const live = LIVE_JOB.has(job.status);
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -124,9 +125,12 @@ export function JobPanel({
     >
       <StageBar job={job} />
       {job.error && (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, overflowWrap: "anywhere" }}>
           <Alert tone="error">
-            {job.error_code && <code className="tp-mono">{job.error_code}</code>} {job.error}
+            <div>{job.error_code && <code className="tp-mono">{job.error_code}</code>} {jobError}</div>
+            {jobError !== job.error && (
+              <div className="v2-muted" style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{job.error}</div>
+            )}
           </Alert>
         </div>
       )}

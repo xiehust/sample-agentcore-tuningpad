@@ -153,3 +153,35 @@ Closed 10-09-eval-observability with a live AC4 run (ev-916804751a on a g6.2xlar
 - Rebuild the OfficeBench agent image so the rl_app.py IndexError fix takes effect
 - Decide whether to push/PR toolkit branch feat/rollout-failure-policy; toolkit test_rollout_entrypoint.py reached real S3 (AccessDenied) — pre-existing hermeticity issue
 - V4 Megatron GPU validation still pending p5 capacity
+
+
+## Session 5: Localized job failures and first wrap-up batch
+
+**Date**: 2026-10-10
+**Task**: 10-10-project-wrap-up (R1a / R4a / R4b only)
+**Branch**: `main`
+
+### Summary
+
+JobPanel now localizes worker error codes during rendering while retaining the original diagnostic. The rollout failure policy task reflects implemented code with live AC5 still outstanding. First-batch checks passed; the wider wrap-up remains open.
+
+### Main Changes
+
+- Reused `localizedMessage` in JobPanel, added en/zh-CN rollout guard copy, kept unknown-code fallback and diagnostic text without duplication.
+- Updated the rollout task to `in_progress`, retained its unchecked AC5 and null completion date, and documented toolkit PR #2 merged at `642471f` (contains `2788cd3`).
+- Clarification to earlier Next Steps: toolkit push/PR is already done; guardian scale-to-zero without the backend was verified on 2026-10-09. Neither closes rollout AC5 or training auto-resume validation.
+- Recorded the successful-job-response localization contract in the error-handling spec. User-approved Playwright CLI/skill installation is user-level only; no project dependency change.
+
+### Testing
+
+- [OK] Frontend lint/typecheck, `make verify`, strict i18n, and independent read-only code review.
+- [OK] Playwright CLI with loopback mock API: en/zh-CN at desktop and narrow widths, language switching, unknown/empty codes, diagnostic preservation, deduplication, no-error states and long-text layout.
+- [OK] JSON results and screenshots in `.run/job-panel-qa-*`; durable summary in `.trellis/tasks/10-10-project-wrap-up/verification.md`. Only mock GETs, no mutation requests.
+
+### Git Commits
+
+Not committed or pushed, as scoped. Journal/index recorded manually; automatic commit/archive scripts were not run.
+
+### Status and Next Steps
+
+First batch B1–B4 complete; both tracking tasks remain `in_progress`. Remaining work includes live rollout AC5 (cost approval required), OfficeBench image update verification, toolkit test isolation, historical validation gaps, publication and resource-retention decisions. No AWS/K8s operations were performed.

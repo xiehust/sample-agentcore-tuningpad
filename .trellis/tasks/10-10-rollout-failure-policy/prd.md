@@ -4,7 +4,11 @@
 
 Stop training on non-model rollout failures as reward 0: classify failures, drop agent/infra failures, retry transient fast failures once, surface counts
 
-## 现状（2026-10-10 读代码确认）
+## 当前交付状态（2026-10-10 收尾核对）
+
+实现及 AC1–AC4 已完成，任务保持 `in_progress` 等待 AC5 真实训练验收；AC5 需要单独批准费用，尚未执行。OfficeBench 镜像是否已包含修复仍待核实，本轮没有构建或部署。toolkit 合并事实见下文“Toolkit 交付”。
+
+## 实施前现状（2026-10-10 读代码确认，历史背景）
 
 - 训练是同步 on-policy：`trainer.v1.trainer_mode=agentcore_sync`（`backend/app/render/train.py:35`），单条 rollout 没有重试。
 - toolkit `backends/verl/agent_loop.py:243-284`：
@@ -30,7 +34,7 @@ Stop training on non-model rollout failures as reward 0: classify failures, drop
 - **R1 分类（toolkit）**：
   - 网关给每个 session 记一个 `context_exhausted` 标记，在发出 context-limit 错误时置位，并在 `finish_session` 之前提供读取。
   - `AgentCoreAgentLoop` 根据上表把失败归入 `model` / `transient` / `agent_error`，不靠匹配错误文本。
-  - 每次失败打一行固定格式的日志，字段顺序固定：`[rollout-failure] class=<model|transient|agent_error|timeout> action=<train|retry|drop> phase=<train|val> sid=<sid> step=<global_steps> reason=<截断后的原因>`。`phase` 字段和 `rollout_retries` 已于 2026-10-10 通过对方发起的新消息链补发给 toolkit Darwin。它的最终报告可能超出消息链的 5 分钟时限而送不回来；届时以 `git -C ../agentcore-rl-toolkit log feat/rollout-failure-policy -1` 和该分支 `backends/verl/README.md` 的失败处理一节为准。
+  - 最初约定单条失败日志包含 `class/action/phase/sid/step/reason`。最终交付的日志不含 `phase`，TuningPad 改用仅统计训练 rollout 的每步指标，不解析这些单条日志；最终契约以 R6 和下文“Toolkit 交付”为准。
 - **R2 丢弃（toolkit）**：`agent_error` 以及重试用完的 `transient`，统一抛出带分类信息的 `RolloutDropped`（继承 `RuntimeError`）。依赖 verl sync 模式的默认行为，同组其他样本照常训练，`total_missing_sessions` 会算上这些丢弃。
 - **R3 重试（toolkit）**：
   - 只重试 `transient`。重试时先 `finish_session` 丢弃旧 session，再 `create_session`，并用新 sid 重新 invoke，退避 2–5 秒（带随机抖动）。
@@ -47,7 +51,9 @@ Stop training on non-model rollout failures as reward 0: classify failures, drop
 - **R6b 保护触发后不重试（TuningPad，已实现）**：RayJob 失败时，如果最新一次尝试的日志里出现 `RolloutFailureGuardError`，run 直接以 `run.rollout_failure_guard` 失败，不再从 checkpoint 恢复。恢复后同一个 bug 会再触发一次保护，每次重试都要白跑 `agentcore_drop_guard_steps` 步 GPU。`pipelines/run.py:_non_retryable` 只检查最新一次尝试的日志，旧尝试里的保护日志不影响重试。
 - **R7 修复已知 bug（toolkit 示例）**：`examples/strands_officebench_agent/rl_app.py:98` 遇到空内容时安全取文本，保证 reward 一定会计算。OfficeBench agent 镜像需要在控制台手动重建：agent 镜像不按 toolkit 版本自动重建，trainer 镜像会自动重建。
 
-## Toolkit 交付（2026-10-10，`feat/rollout-failure-policy` @ 2788cd3，未 push）
+## Toolkit 交付（2026-10-10，已合并）
+
+- `feat/rollout-failure-policy` 的实现提交 `2788cd3` 已通过 PR #2 合并至 `main`（`642471f`）。收尾时已用本地 Git 日志和祖先关系核实；原先“未 push”的描述是交付当时的状态，不再是待办。
 
 - loop 参数：`drop_agent_errors=True`、`max_rollout_retries=1`、`timeout_policy="drop"`。丢弃时抛 `RolloutDropped`，异常带 `.failure_class`。
 - 保护：`RolloutFailureGuardMixin`（仅 `agentcore_sync`）。超阈值时抛 `RolloutFailureGuardError`。阈值配置为 `+trainer.v1.agentcore_max_drop_fraction`（默认 0.5，设为 null 关闭）和 `+trainer.v1.agentcore_drop_guard_steps`（默认 3）；这两个 key 不在 verl 原有配置里，所以要加 `+` 前缀。TuningPad 目前不传，使用默认值。

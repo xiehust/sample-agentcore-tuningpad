@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Require mock-only bilingual browser checks, strict i18n and make verify."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check localization without losing the original worker error or changing retry policy."}
+{"file":".trellis/tasks/10-10-project-wrap-up/prd.md","reason":"Check B1-B4 and ensure live acceptance remains open."}
+{"file":".trellis/tasks/10-10-project-wrap-up/implement.md","reason":"Verify regression matrix and deferred-work boundaries."}

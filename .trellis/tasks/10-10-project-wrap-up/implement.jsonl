@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Reuse the existing JobPanel, V2 alert and translated copy conventions."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Preserve nullable job errors and existing typed API contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Reuse stable error-code localization and preserve worker diagnostic messages."}
+{"file":".trellis/tasks/10-10-project-wrap-up/design.md","reason":"First-batch boundary and compatibility design for final review; no toolkit or cloud changes."}

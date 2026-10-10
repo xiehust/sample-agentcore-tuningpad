@@ -64,6 +64,16 @@ middleware into the route exception handlers. `validate_startup()` instead raise
 `code`, `detail`, and HTTP `status`. `localizedMessage()` checks `apiErrors.<code>` and
 falls back to the backend English message if the key is missing.
 
+Job failures arrive in successful job-query responses as nullable `Job.error_code` and
+`Job.error`, so they do not pass through `parseResponse()`'s error branch. `JobPanel`
+reuses `localizedMessage(code, fallback)` during rendering: show the localized summary
+and keep the original code and diagnostic text; show the diagnostic only once if it is
+already the displayed message. Unknown/null codes fall back to the raw error; null/empty
+errors produce no alert. Do not overwrite the stored diagnostic with a translation or
+cache the translated summary in state, which would make language switching stale.
+For this path, verify both locales, live language switching, unknown/empty codes,
+identical summary/raw text, and long diagnostics in mock-only browser QA.
+
 Every new user-facing code needs matching entries in both:
 
 - `frontend/src/locales/en/common.json`

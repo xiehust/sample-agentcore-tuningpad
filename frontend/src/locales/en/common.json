@@ -113,6 +113,7 @@
     "cluster.plan_required": "A training plan ARN is required",
     "cluster.group_capacity_mismatch": "This instance group uses a different capacity source; choose another group name",
     "pool.name_taken": "That name is already used by another compute pool on this cluster",
+    "run.rollout_failure_guard": "Training stopped because too many rollouts were dropped. Automatic retry was skipped to avoid repeating the failure. Check the agent and training logs before retrying.",
     "eval.not_found": "Evaluation not found",
     "eval.sample_not_found": "This sample is not in the evaluation results",
     "eval.observability_off": "CloudWatch Transaction Search is off in this Region; enable it to record traces",

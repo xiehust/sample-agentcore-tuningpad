@@ -113,6 +113,7 @@
     "cluster.plan_required": "需要填写训练计划 ARN",
     "cluster.group_capacity_mismatch": "该实例组使用的是另一种容量来源，请换一个实例组名称",
     "pool.name_taken": "该名称已被本集群的其他计算池使用",
+    "run.rollout_failure_guard": "训练因过多 rollout 被丢弃而停止。为避免重复失败，未执行自动重试。请先检查 agent 和训练日志，再决定是否重试。",
     "eval.not_found": "评估不存在",
     "eval.sample_not_found": "评估结果中没有这个样本",
     "eval.observability_off": "该区域尚未开启 CloudWatch Transaction Search，开启后才能记录调用链",
