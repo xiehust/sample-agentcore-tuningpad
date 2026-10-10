@@ -40,3 +40,21 @@ def test_ignores_noise_and_nan():
     assert verl_log.parse_line("INFO starting ray") is None
     r = verl_log.parse_line("step:3 - a:nan - b:1e-3 - c:np.float32(2.5) - bad")
     assert r == (3, {"b": 0.001, "c": 2.5})
+
+
+def test_parses_toolkit_rollout_failure_metrics():
+    line = (
+        "\x1b[36m(TaskRunnerV1 pid=5)\x1b[0m step:7 - training/rollout_failure/total_missing_sessions:3"
+        " - training/rollout_failure/total_transient_retry:2"
+        " - training/rollout_failure/total_model_train:1"
+        " - training/rollout_failure/drop_fraction:np.float64(0.0234375)"
+    )
+    step, m = verl_log.parse_line(line)
+    assert step == 7
+    assert m == {
+        "training/rollout_failure/total_missing_sessions": 3,
+        "training/rollout_failure/total_transient_retry": 2,
+        "training/rollout_failure/total_model_train": 1,
+        "training/rollout_failure/drop_fraction": 0.0234375,
+    }
+    assert set(m) <= set(verl_log.KEY_METRICS)  # charted on the Runs health panel

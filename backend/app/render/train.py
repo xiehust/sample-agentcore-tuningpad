@@ -294,6 +294,11 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
         "linear_on_nonlinear",
         "reward_extra_info_defaults",
         "reward_thresholds",
+        # Rollout failure policy (toolkit defaults: drop agent errors and timeouts,
+        # retry transient failures once); a template may override them.
+        "drop_agent_errors",
+        "max_rollout_retries",
+        "timeout_policy",
     ):
         if template_loop.get(k) is not None:
             loop[k] = template_loop[k]

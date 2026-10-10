@@ -34,6 +34,9 @@ GPU_NODE_FAULTS = re.compile(
     r"|fallen off the bus"
 )
 ATTEMPT_MARK = "[tuningpad] starting verl main_ppo"  # train script, once per attempt
+# The toolkit's dropped-rollout guard: an agent/environment bug drops most rollouts. A
+# checkpoint resume only replays it, burning `agentcore_drop_guard_steps` GPU steps per retry.
+NON_RETRYABLE = re.compile(r"RolloutFailureGuardError")
 
 
 def load_run(run_id: str) -> dict[str, Any]:
@@ -376,6 +379,16 @@ def _replace_faulty_nodes(
         ctx.log(f"GPU node fault on {node}: {msg}")
 
 
+def _non_retryable(run: dict[str, Any], region: str, bucket: str) -> str | None:
+    """The latest attempt's log line that makes a retry pointless, if any."""
+    offset = int((run["progress"] or {}).get("log_offset", 0))
+    tail, _ = svc.read_log(region, bucket, run["id"], max(0, offset - 256 * 1024))
+    for line in tail.rsplit(ATTEMPT_MARK, 1)[-1].splitlines():
+        if NON_RETRYABLE.search(line):
+            return re.sub(r"\x1b\[[0-9;]*m", "", line).strip()[:500]
+    return None
+
+
 def stage_monitor(ctx: StageContext) -> None:
     run = load_run(ctx.target_id)
     c = pc.load(run["cluster_id"])
@@ -407,6 +420,12 @@ def stage_monitor(ctx: StageContext) -> None:
                 save_run(run["id"], status="succeeded")
                 break
             if job_status in ("FAILED", "STOPPED") or deploy == "Failed" or (st is None and name):
+                if blocker := _non_retryable(run, region, bucket):
+                    raise AppError(
+                        "run.rollout_failure_guard",
+                        f"RayJob {name} stopped by the dropped-rollout guard; not retried: "
+                        f"{blocker}",
+                    )
                 if run["retries"] >= max_retries:
                     raise AppError(
                         "run.failed",

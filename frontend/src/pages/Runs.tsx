@@ -444,7 +444,7 @@ const CHARTS: { key: string; title: string; series: string[]; fixed01?: boolean 
   { key: "reward", title: "runs.chartReward", series: ["val-core/unknown/reward/mean@1", "critic/score/mean"], fixed01: true },
   { key: "kl", title: "runs.chartKl", series: ["actor/kl_loss"] },
   { key: "len", title: "runs.chartLength", series: ["response_length/mean"] },
-  { key: "health", title: "runs.chartHealth", series: ["training/rollout_failure/total_missing_sessions", "val-aux/unknown/acr_failed/mean@1"] },
+  { key: "health", title: "runs.chartHealth", series: ["training/rollout_failure/total_missing_sessions", "training/rollout_failure/total_transient_retry", "training/rollout_failure/total_model_train", "val-aux/unknown/acr_failed/mean@1"] },
   { key: "time", title: "runs.chartTime", series: ["timing_s/step", "timing_s/gen"] },
   { key: "grad", title: "runs.chartGrad", series: ["actor/grad_norm", "actor/entropy"] },
 ];

@@ -24,6 +24,11 @@ KEY_METRICS = [
     "response_length/mean",
     "training/rollout_failure/total_missing_sessions",
     "val-aux/unknown/acr_failed/mean@1",
+    # Toolkit RolloutFailureGuardMixin (agentcore_sync, training rollouts only): dropped
+    # rollouts are total_missing_sessions; these count the ones retried / kept at reward 0.
+    "training/rollout_failure/total_transient_retry",
+    "training/rollout_failure/total_model_train",
+    "training/rollout_failure/drop_fraction",
     "batching/total_real_rows",
     "critic/advantages/zero_mean",
     "timing_s/step",

@@ -205,6 +205,17 @@ def test_agent_loop_yaml_forces_registered_sessions():
     assert "gateway_public_host" not in loop  # Ray node IP = VPC pod IP
 
 
+def test_agent_loop_yaml_passes_failure_policy_from_template():
+    keys = ("drop_agent_errors", "max_rollout_retries", "timeout_policy")
+    loop = yaml.safe_load(rt.agent_loop_yaml({"max_tokens_per_turn": 8}, rt.merge_params({})))[0]
+    assert not set(keys) & set(loop)  # unset: the toolkit's own defaults apply
+    policy = {"drop_agent_errors": False, "max_rollout_retries": 0, "timeout_policy": "penalize"}
+    loop = yaml.safe_load(
+        rt.agent_loop_yaml({"max_tokens_per_turn": 8, **policy}, rt.merge_params({}))
+    )[0]
+    assert {k: loop[k] for k in keys} == policy
+
+
 def test_train_script_quotes_and_stages_data():
     s = rt.train_script(
         run_id="run-1",
@@ -541,6 +552,35 @@ def test_run_budget_stop(run_env, monkeypatch):
     job = _wait(eng.get_engine().start("run.train", "run-1", {}))
     assert job.error_code == "run.budget_exceeded"
     assert run_env["deleted"] == ["run-1-a0"]
+
+
+def test_rollout_failure_guard_fails_the_run_without_retry(run_env, monkeypatch):
+    from app.pipelines import run as pr
+
+    run_env["states"].append({"job": "FAILED", "deployment": "Failed", "message": "x"})
+    log = (
+        "old attempt: RolloutFailureGuardError from a previous attempt\n"
+        f"{pr.ATTEMPT_MARK}\n"
+        "step:3 - critic/score/mean:0.1 - training/rollout_failure/drop_fraction:0.75\n"
+        "\x1b[36m(TaskRunnerV1 pid=5)\x1b[0m agentcore_rl_toolkit.backends.verl.trainer_mixins."
+        "rollout_failure_guard.RolloutFailureGuardError: dropped 75% of rollouts\n"
+    )
+    monkeypatch.setattr(pr.svc, "read_log", lambda region, bucket, rid, off, **k: (log, off))
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "failed" and job.error_code == "run.rollout_failure_guard"
+    assert "dropped 75% of rollouts" in job.error and "\x1b" not in job.error
+    names = [m["metadata"]["name"] for m in run_env["applied"] if m["kind"] == "RayJob"]
+    assert names == ["run-1-a0"]  # no checkpoint resume: it would only replay the bug
+    with session_scope() as s:
+        assert s.get(Run, "run-1").retries == 0
+
+
+def test_guard_line_of_an_older_attempt_does_not_block_retry(monkeypatch):
+    from app.pipelines import run as pr
+
+    log = f"RolloutFailureGuardError: x\n{pr.ATTEMPT_MARK}\nIndexError: oops\n"
+    monkeypatch.setattr(pr.svc, "read_log", lambda region, bucket, rid, off, **k: (log, off))
+    assert pr._non_retryable({"id": "run-1", "progress": {}}, "us-east-1", "b") is None
 
 
 def test_cost_accrues_only_for_billed_nodes(monkeypatch):
