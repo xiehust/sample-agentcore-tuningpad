@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：首批 B1–B4 已完成并按用户后续授权提交/push（8889a98）；验证见 verification.md。继续只读复核 ledger，R3b/R3e 有部分真实运行证据，详见 remaining-evidence.md。R1b 子任务 10-10-toolkit-test-isolation 保持 planning 等最终方案确认。未修改 toolkit、未操作云资源；其余 AC 仍开放，不归档。",
+  "notes": "2026-10-10：首批 B1–B4 已发布（8889a98）；剩余证据复核见 remaining-evidence.md。R1b 测试隔离实现验收完成：toolkit 99ab5d7 已推送 fix/rollout-test-isolation，75 个相关离线测试通过、验证器零违规，待合并 main。父 AC2 已勾选；AC3–AC6 与原失败策略 AC5 仍开放。仅修改 toolkit 测试文件，无生产代码/依赖/云资源变更。",
   "meta": {}
 }

@@ -193,3 +193,28 @@ The user subsequently authorized commit/push and continuation. `8889a98` was pus
 Read-only local ledger/job-log inspection found OfficeBench `run-210c57c0cb` completed three training steps, exported step 3 and ran a downstream eval with failed samples; this is partial validation, not the full preset or the new rollout policy. The same job retried and resumed monitoring across backend restarts, but checkpoint-weight restoration is not proven. Details are in `remaining-evidence.md`.
 
 The next offline batch is planned in child task `10-10-toolkit-test-isolation`: mock S3 before app construction and verify background writes without external networking. It remains planning pending the final implementation review; no sibling files or cloud resources were changed.
+
+## Session 6: Isolate toolkit rollout entrypoint tests
+
+**Date**: 2026-10-10
+**Task**: 10-10-toolkit-test-isolation (parent R1b)
+**Branch**: TuningPad `main`; toolkit `fix/rollout-test-isolation`
+
+### Summary
+
+After user confirmation, fixed only toolkit's `tests/test_rollout_entrypoint.py`: mock S3 before app construction, verify actual background save/completion, and cover handler-error/non-dict results. Production code and dependencies are unchanged.
+
+### Testing
+
+- [OK] Guard self-test blocked real AWS client, external DNS and socket probes before actual calls. The original location-response test failed at real client construction under this guard, as expected.
+- [OK] Updated target file: 21 passed; expanded target/client/async-client suite: 75 passed including those 21. Both recorded zero denied attempts. Guard scope is in-process Python/AWS interception, not an OS sandbox.
+- [OK] Target Ruff check and format check, independent read-only review, and TuningPad `make verify`.
+- [OK] Evidence and commands: `.trellis/tasks/10-10-toolkit-test-isolation/verification.md`; local runner: `.run/toolkit-offline-pytest.py`.
+
+### Git Commits
+
+- toolkit `99ab5d7` — `test(app): isolate rollout entrypoint aws clients`; pushed to `origin/fix/rollout-test-isolation`, not merged into toolkit main.
+
+### Status and Next Steps
+
+Child AC1–AC4 and parent AC2 implementation verification passed. The child remains `in_progress` pending branch merge; no completed task was prematurely archived. Cloud validation, image updates and resource decisions remain open; no AWS/K8s operations were performed.

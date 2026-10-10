@@ -9,7 +9,7 @@
 - 2026-10-10：用户先同意建立收尾任务，随后确认首批范围为“TuningPad 的错误提示本地化和记录同步”；暂不修改 toolkit、不做云端操作。
 - 首批只覆盖 R1a、R4a、R4b，由本任务直接承载；其余需求仍为后续跟踪，不因首批完成而关闭。首批设计和执行计划见 `design.md`、`implement.md`。
 - 用户已最终确认首批方案，并要求改用 Playwright CLI 验收。首批 B1–B4 已完成。随后用户明确要求 commit/push 并继续其余事项；首批提交 `8889a98` 已推送至 `origin/main`。
-- 整个跟踪任务保持 `in_progress`。下一批 R1b 由子任务 `../10-10-toolkit-test-isolation/prd.md` 规划，待最终方案确认；真实云端操作仍需单独批准费用。剩余证据复核见 `remaining-evidence.md`。
+- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。真实云端操作仍需单独批准费用；其他缺口见 `remaining-evidence.md`。
 - 原任务 `../10-10-rollout-failure-policy/prd.md` 继续拥有失败策略的 AC1–AC5；本任务引用其结果，不重复执行或提前归档。
 
 ## Requirements
@@ -17,7 +17,7 @@
 ### R1 本地工程缺口
 
 - **R1a 错误提示本地化**：补齐 `run.rollout_failure_guard` 的中英文说明，并核对实际 JobPanel 展示路径，而不只添加未被使用的 locale key。审计时证据：`backend/app/pipelines/run.py:425`、`frontend/src/components/JobPanel.tsx:129`；当时两种 `common.json` 均缺少该 key。依据 `.trellis/spec/backend/error-handling.md`，新增用户可见错误码须有翻译。首批已补齐并在真实组件的本地 mock 场景验证，详见 `verification.md`。
-- **R1b toolkit 测试隔离（跨仓库）**：跟踪 `../agentcore-rl-toolkit/tests/test_rollout_entrypoint.py:91` 中未替换真实 S3 客户端的测试；`src/agentcore_rl_toolkit/app.py:44,96` 会创建客户端并写 S3。先明确 sibling 仓库的实施范围，修复后用无真实 AWS 访问的测试证明隔离，不能用真实凭据重跑来验证。历史问题记录见 `.trellis/workspace/river/journal-1.md:154`。
+- **R1b toolkit 测试隔离（修复分支已验证，待合并）**：`tests/test_rollout_entrypoint.py` 已在 app 构造前 mock S3，并等待和断言后台保存。75 个相关测试通过，Python/AWS 验证器记录为零违规；生产代码和依赖未改。提交 `99ab5d7` 已推送 toolkit 独立分支，但主分支尚未包含修复；详见子任务验收记录。
 
 ### R2 当前功能的部署与真实验收
 
@@ -42,7 +42,7 @@
 ## Acceptance Criteria
 
 - [x] AC1（R1a）：中英文界面都能显示失败保护的本地化说明；技术诊断信息不丢失；相关回归和项目质量门禁通过。
-- [ ] AC2（R1b）：跨仓库测试隔离有修复及离线验证证据，或用户明确决定移交/延期并留下对应记录；不能仅以测试返回成功认定没有后台 S3 访问。
+- [x] AC2（R1b）：跨仓库测试隔离有修复及离线验证证据，或用户明确决定移交/延期并留下对应记录；不能仅以测试返回成功认定没有后台 S3 访问。
 - [ ] AC3（R2a）：原任务 AC5 有真实验收证据，或用户明确接受将它延期；任何延期均不得标为“真实验收通过”。
 - [ ] AC4（R2b）：记录实际使用的 OfficeBench 镜像所含修复版本与安全验证结果，或用户明确接受延期；已有新版镜像时不重复构建。
 - [ ] AC5（R3）：每个验证缺口都有可复查的运行证据、仍待验证的范围，或用户确认的延期决定；评测、训练和不同 provider 的证据不得互相替代。

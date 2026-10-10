@@ -3,7 +3,7 @@
   "name": "toolkit-test-isolation",
   "title": "隔离 toolkit rollout 入口测试的 AWS 客户端",
   "description": "仅修复 sibling toolkit 的 rollout 入口测试隔离：构造前 mock S3、验证后台写入，并在阻断外部网络的环境中回归。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -12,7 +12,7 @@
   "assignee": "river",
   "createdAt": "2026-10-10",
   "completedAt": null,
-  "branch": null,
+  "branch": "main",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,10 @@
   "children": [],
   "parent": "10-10-project-wrap-up",
   "relatedFiles": [],
-  "notes": "",
-  "meta": {}
+  "notes": "2026-10-10：用户确认继续；AC1–AC4 实现验收通过，21 个目标测试及包含它们的 75 个相关测试通过，Python/AWS 验证器违规记录为空，Ruff 和 TuningPad make verify 通过。toolkit 99ab5d7 已推送独立修复分支，未合并 main；保留 in_progress 等待合并收尾。",
+  "meta": {
+    "target_repo": "../agentcore-rl-toolkit",
+    "target_branch": "fix/rollout-test-isolation",
+    "target_commit": "99ab5d7"
+  }
 }

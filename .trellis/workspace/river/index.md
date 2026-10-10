@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-10-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~195 | Active |
+| `journal-1.md` | ~220 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-10-10 | Isolate toolkit rollout entrypoint tests | toolkit `99ab5d7` | `main`; toolkit `fix/rollout-test-isolation` |
 | 5 | 2026-10-10 | Localized job failures and first wrap-up batch | `8889a98` | `main` |
 | 4 | 2026-10-10 | Eval traces AC4 live acceptance; rollout failure policy | `8d24903`, `e9ee6a3`, `a9db316`, `6c48dc8`, `0bfece6`, `c14d29a` | `main` |
 | 3 | 2026-10-08 | Fill backend/frontend Trellis specs; archive finished tasks | `daa2169` | `main` |
