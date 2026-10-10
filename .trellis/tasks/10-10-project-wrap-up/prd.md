@@ -9,7 +9,7 @@
 - 2026-10-10：用户先同意建立收尾任务，随后确认首批范围为“TuningPad 的错误提示本地化和记录同步”；暂不修改 toolkit、不做云端操作。
 - 首批只覆盖 R1a、R4a、R4b，由本任务直接承载；其余需求仍为后续跟踪，不因首批完成而关闭。首批设计和执行计划见 `design.md`、`implement.md`。
 - 用户已最终确认首批方案，并要求改用 Playwright CLI 验收。首批 B1–B4 已完成。随后用户明确要求 commit/push 并继续其余事项；首批提交 `8889a98` 已推送至 `origin/main`。
-- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。随后用户明确授权 AWS 只读盘点与镜像构建：OfficeBench 两区发布和 us-east-1 FSDP 构建已完成，详见 `build-operations.md`。运行时部署、GPU 扩容、训练和删除未获本轮授权；其他缺口见 `remaining-evidence.md`。
+- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。随后用户明确授权 AWS 只读盘点与镜像构建：OfficeBench 两区发布和 us-east-1 FSDP 构建已完成，详见 `build-operations.md`。用户再批准镜像级运行时更新与 READY 检查后，4 个 OfficeBench runtime 及 DEFAULT 均已达到版本 2 / READY，配置和标签未变，详见 `runtime-deployment.md`。未调用模型、扩容 GPU、训练或删除；其他缺口见 `remaining-evidence.md`。
 - 原任务 `../10-10-rollout-failure-policy/prd.md` 继续拥有失败策略的 AC1–AC5；本任务引用其结果，不重复执行或提前归档。
 
 ## Requirements
@@ -22,7 +22,7 @@
 ### R2 当前功能的部署与真实验收
 
 - **R2a Rollout failure policy AC5**：原任务 AC1–AC4 已勾选，AC5 未完成。需单独批准后，以小规模训练注入部分 agent 异常，确认异常样本被丢弃、同组其他样本继续训练、health 图有指标且 step 完成。证据：`../10-10-rollout-failure-policy/prd.md:60-64`。未经真实验收，不能据离线测试声称该行为已在 Ray/GPU 环境成立。
-- **R2b OfficeBench 镜像更新（构建发布完成，待部署）**：已核对 AWS 并构建包含修复的 ARM 镜像，两区 ECR 发布、源码哈希和 `/ping` 验证通过，Agent 记录指向 `*-99ab5d7dee`。但训练/评测/standalone 运行时仍指向旧镜像，本轮没有部署或调用模型，不能声称线上空回复问题已修复。详情见 `build-operations.md`。
+- **R2b OfficeBench 镜像更新（构建、发布、部署完成）**：两区新 ARM 镜像的源码哈希和本机 `/ping` 已验证；关联训练、评测和 standalone runtime 均已采用 `*-99ab5d7dee`，runtime / DEFAULT 均为 READY 且 liveVersion=2。角色、网络、平台、环境和标签指纹保持一致，旧 smoke 结果留作历史，不冒充新镜像的模型验证。详见 `build-operations.md`、`runtime-deployment.md`；真实模型/训练验收未执行。
 
 ### R3 历史验证缺口（先核实证据，不直接当作功能缺陷）
 
@@ -44,7 +44,7 @@
 - [x] AC1（R1a）：中英文界面都能显示失败保护的本地化说明；技术诊断信息不丢失；相关回归和项目质量门禁通过。
 - [x] AC2（R1b）：跨仓库测试隔离有修复及离线验证证据，或用户明确决定移交/延期并留下对应记录；不能仅以测试返回成功认定没有后台 S3 访问。
 - [ ] AC3（R2a）：原任务 AC5 有真实验收证据，或用户明确接受将它延期；任何延期均不得标为“真实验收通过”。
-- [ ] AC4（R2b）：记录实际使用的 OfficeBench 镜像所含修复版本与安全验证结果，或用户明确接受延期；已有新版镜像时不重复构建。
+- [x] AC4（R2b）：记录实际使用的 OfficeBench 镜像所含修复版本与安全验证结果，或用户明确接受延期；已有新版镜像时不重复构建。
 - [ ] AC5（R3）：每个验证缺口都有可复查的运行证据、仍待验证的范围，或用户确认的延期决定；评测、训练和不同 provider 的证据不得互相替代。
 - [ ] AC6（R4）：任务状态与真实交付状态一致，过期待办已澄清；发布与云资源处置有明确决定或被标为待决定，不执行未经授权的 push、构建、扩容或删除。
 
@@ -68,6 +68,6 @@
 ## Out of Scope
 
 - 首批实现不修改 sibling toolkit，不执行 AC5 或其他真实验收，不重建/部署镜像，不决定云资源去留，不归档仍有验收缺口的任务。首批实现时的“不提交/push”限制已被用户后续的明确发布授权取代。
-- 用户后续授权仅扩展到 AWS 只读盘点、OfficeBench 镜像构建/ECR 发布，以及 us-east-1 FSDP CodeBuild。不得据此执行 CloudFormation、运行时部署、GPU 扩容、训练、资源删除或其他未批准操作。
+- 用户后续授权扩展到 AWS 只读盘点、OfficeBench 镜像构建/ECR 发布、us-east-1 FSDP CodeBuild，以及关联 OfficeBench 运行时镜像更新与 READY/路由核对。不得据此调用模型、执行 CloudFormation、扩容 GPU、训练、删建运行时、删除其他资源或执行未批准操作。
 - 不修改后台错误码、训练失败保护、重试逻辑、API/数据库契约、鉴权或费用确认；不扩大到新训练功能、异步 rollout failure policy 或控制台新增配置项。
 - 不全面补译所有历史后台错误码；只复用已有错误本地化能力，并新增本次遗漏的 key。

@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：首批 B1–B4 已发布；R1b 修复分支99ab5d7已验证待合并。用户后续授权AWS盘点和构建：OfficeBench同一ARM镜像已发布两区、Agent记录ready；us-east-1 FSDP镜像fsdp-99ab5d7dee已通过CodeBuild及来源/digest/架构核验。未部署运行时，未扩容/训练/删除；AC3–AC6与原失败策略AC5继续开放。详见build-operations.md。",
+  "notes": "2026-10-10：首批与R1b修复已验证（toolkit分支99ab5d7待合并）。OfficeBench镜像两区发布、us-east-1 FSDP镜像ready；用户再授权部署后，4个OfficeBench runtime及DEFAULT均为版本2/READY，配置与标签未变。父AC4完成；AC3/AC5/AC6及原失败策略AC5仍开放。未调用模型、扩容GPU、训练或删建运行时；详见build-operations.md与runtime-deployment.md。",
   "meta": {}
 }

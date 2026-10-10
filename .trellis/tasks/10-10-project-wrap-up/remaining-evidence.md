@@ -39,4 +39,6 @@
 
 用户随后授权 AWS 只读盘点与构建。OfficeBench 新 ARM 镜像已在两区发布，主区域 us-east-1 的 FSDP trainer `fsdp-99ab5d7dee` 已构建并验证 ready；此前“没有新镜像”只适用于构建前快照。源码 hash、构建日志/ECR digest、架构和本机 health 验证见 `build-operations.md`。
 
-运行时仍使用旧镜像，没有执行部署或真实训练验收。两个集群仍存在，GPU 节点组均为 0，但 CPU system 节点与基础设施仍在；未查询实际账单或决定资源去留。Megatron/第二地区 trainer 未重复构建。
+构建完成时运行时仍使用旧镜像。用户后续另行批准部署后，四个 OfficeBench runtime 和 DEFAULT 已达到新镜像/版本 2/READY，配置与标签核验通过，详见 `runtime-deployment.md`；没有调用模型或执行真实训练验收。
+
+先前 AWS 盘点确认两个集群仍存在、GPU 节点组均为 0，但 CPU system 节点与基础设施仍在；本轮没有扩容或删除，未查询实际账单或决定资源去留。Megatron/第二地区 trainer 未重复构建。

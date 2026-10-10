@@ -239,3 +239,24 @@ The user authorized AWS inventory and builds. Built one OfficeBench ARM image fr
 ### Status and Next Steps
 
 Final AWS reads confirm OfficeBench training, observed-eval and standalone runtimes still reference their old images. Image publication is complete, runtime adoption and real rollout AC5 are not. Deployment/model invocation/GPU tests require further approval; actual bill charges were not queried. No Megatron or second-region trainer rebuild was launched.
+
+## Session 8: Adopt OfficeBench images without model invocation
+
+**Date**: 2026-10-10
+**Task**: 10-10-project-wrap-up (approved image-only runtime updates)
+**Branch**: `main`
+
+### Summary
+
+The user approved updating associated OfficeBench AgentCore runtimes and checking READY only. All four runtime/default endpoints are now version 2 / READY on the verified image. Role, network, platform, environment, lifecycle, metadata and tag fingerprints remained unchanged; no model invocation, GPU scale-up, training, runtime creation/deletion or session stop was performed.
+
+### Operation and Verification
+
+- PUBLIC/V1 standalone updated first. The first VPC request was rejected for echoing the post-rollout read-only `requireServiceS3Endpoint` flag; read-only reconciliation confirmed the old version remained intact. Omitted only that forbidden request field while retaining it in configuration verification, then resumed without re-updating standalone.
+- Persisted deploying intent before the mutation to handle ambiguous responses correctly. Offline tests covered drift/rejection handling, stable-token no-replay, Retry-After, DEFAULT routing and preserving historical smoke evidence.
+- [OK] Final independent AWS/ledger checks confirmed all four new versions/default routes, expected ECR digest and unchanged fingerprints. Standalone stayed V1/PUBLIC; other runtimes stayed V2/VPC; only the observed-eval twin retained OTEL configuration.
+- [OK] `make verify` and read-only reviews; review finding was corrected and tested. Contracts captured in `.trellis/spec/backend/agentcore-image-updates.md`; deployment evidence in `.trellis/tasks/10-10-project-wrap-up/runtime-deployment.md`.
+
+### Status and Next Steps
+
+Parent AC4 (image adoption and safety verification) is complete. Old model smoke results remain historical under `last_smoke.previous`; current validation is `ready_only`, not a new model/quality result. Rollout failure-policy AC5, other real-training validations and resource-retention decisions remain open and need their own approvals.

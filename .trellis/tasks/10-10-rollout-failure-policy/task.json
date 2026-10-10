@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：代码与 AC1–AC4 已完成；toolkit PR #2 已合并至 main（642471f，包含 2788cd3）。AC5 真实训练验收尚未完成，需单独批准费用；OfficeBench 修复镜像已发布两区，us-east-1 FSDP 镜像 fsdp-99ab5d7dee 已验证 ready；未部署运行时或执行 AC5。产物见 10-10-project-wrap-up/build-operations.md。",
+  "notes": "2026-10-10：代码与 AC1–AC4 已完成；toolkit PR #2 已合并至 main（642471f，包含 2788cd3）。AC5 真实训练验收尚未完成，需单独批准费用；OfficeBench 修复镜像已发布两区，us-east-1 FSDP 镜像 fsdp-99ab5d7dee 已验证 ready；用户批准的四个 OfficeBench 运行时镜像更新与 READY/DEFAULT 核对已完成，配置标签未变；未调用模型或执行 AC5。产物及部署见 10-10-project-wrap-up/build-operations.md、runtime-deployment.md。",
   "meta": {}
 }

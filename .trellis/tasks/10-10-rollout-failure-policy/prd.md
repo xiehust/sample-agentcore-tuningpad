@@ -6,7 +6,7 @@ Stop training on non-model rollout failures as reward 0: classify failures, drop
 
 ## 当前交付状态（2026-10-10 收尾核对）
 
-实现及 AC1–AC4 已完成，任务保持 `in_progress` 等待 AC5 真实训练验收；AC5 需要单独批准费用，尚未执行。用户后续授权构建后，OfficeBench 修复镜像已发布到两区，us-east-1 FSDP trainer `fsdp-99ab5d7dee` 已构建并验证；但 AgentCore 运行时仍使用旧镜像，尚未部署或训练。产物与边界见 `../10-10-project-wrap-up/build-operations.md`。toolkit 合并事实见下文“Toolkit 交付”。
+实现及 AC1–AC4 已完成，任务保持 `in_progress` 等待 AC5 真实训练验收；AC5 需要单独批准费用，尚未执行。用户后续授权构建后，OfficeBench 修复镜像已发布到两区，us-east-1 FSDP trainer `fsdp-99ab5d7dee` 已构建并验证；用户随后批准的镜像级部署也已完成，四个 OfficeBench runtime / DEFAULT 均为新镜像、版本 2 / READY，配置与标签未变；没有调用模型或执行训练。产物与边界见 `../10-10-project-wrap-up/build-operations.md`、`../10-10-project-wrap-up/runtime-deployment.md`。toolkit 合并事实见下文“Toolkit 交付”。
 
 ## 实施前现状（2026-10-10 读代码确认，历史背景）
 
@@ -49,7 +49,7 @@ Stop training on non-model rollout failures as reward 0: classify failures, drop
   - 使用 toolkit 在训练日志行里上报的每步指标：`training/rollout_failure/total_<class>_<action>`（每步都有，没有时为 0）和 `drop_fraction`。这些指标只统计训练阶段的 rollout。Runs 页的 health 图展示 `total_missing_sessions`（丢弃数）、`total_transient_retry` 和 `total_model_train`；其他指标照常入库。
   - 不解析单条 `[rollout-failure]` 日志行。原因有三：Ray 默认的日志去重会把只差 sid、step 的行合并，导致少计；toolkit 最终的日志格式里没有 `phase` 字段；每步指标已经包含了同样的信息。
 - **R6b 保护触发后不重试（TuningPad，已实现）**：RayJob 失败时，如果最新一次尝试的日志里出现 `RolloutFailureGuardError`，run 直接以 `run.rollout_failure_guard` 失败，不再从 checkpoint 恢复。恢复后同一个 bug 会再触发一次保护，每次重试都要白跑 `agentcore_drop_guard_steps` 步 GPU。`pipelines/run.py:_non_retryable` 只检查最新一次尝试的日志，旧尝试里的保护日志不影响重试。
-- **R7 修复已知 bug（toolkit 示例）**：`examples/strands_officebench_agent/rl_app.py` 安全提取空回复的文本，避免日志代码在计算 reward 前崩溃。agent 镜像不随 toolkit 版本自动重建；修复镜像现已构建并发布两区，但仍需部署到关联运行时。trainer 镜像按 revision 检查，本轮已预构建 us-east-1 的 FSDP 修复版。
+- **R7 修复已知 bug（toolkit 示例）**：`examples/strands_officebench_agent/rl_app.py` 安全提取空回复的文本，避免日志代码在计算 reward 前崩溃。agent 镜像不随 toolkit 版本自动重建；修复镜像已构建并发布两区，关联运行时也已更新并达到 READY，真实模型调用验证仍未执行。trainer 镜像按 revision 检查，本轮已预构建 us-east-1 的 FSDP 修复版。
 
 ## Toolkit 交付（2026-10-10，已合并）
 

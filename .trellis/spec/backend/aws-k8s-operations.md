@@ -19,6 +19,10 @@ half-finished previous attempt.
 
 ## AgentCore Runtime
 
+For image-only maintenance, follow [the update contract](./agentcore-image-updates.md):
+GET responses contain a rollout-dependent immutable VPC flag, and runtime READY alone
+does not prove the DEFAULT endpoint routes to the new version.
+
 - **Platform version.** Always pass `platformVersion` on both create and update. If update
   leaves it out, the runtime keeps its current version, so a V1 runtime would never move to
   V2. The default is `auto`: V2 in `V2_REGIONS`, V1 everywhere else. The create response does

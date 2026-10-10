@@ -26,6 +26,7 @@ logging service, or automatic exactly-once execution exists.
 | [Quality Guidelines](./quality-guidelines.md) | Python/uv/Ruff, hermetic stubs, make verify, and cost/security review checks | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Process diagnostics, job byte-offset logs, S3 training logs, and secret-handling limits | Filled |
 | [AWS / K8s Operations](./aws-k8s-operations.md) | AgentCore V1/V2, cluster delete order, GPU node lifecycle, EFA proof, CPU-node CUDA images, eval sampling | Filled |
+| [Image-only AgentCore Updates](./agentcore-image-updates.md) | Immutable network fields, preserved configuration, update idempotency, DEFAULT routing and readiness-only evidence | Filled |
 
 ## Pre-Development Checklist
 

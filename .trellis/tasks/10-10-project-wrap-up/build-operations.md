@@ -44,8 +44,12 @@
 
 仓库 `make verify` 在构建完成后再次通过。仅任务/会话记录发生 Git 变更，操作脚本、构建 context 与运行 ledger 都保留在 gitignored 目录；未修改生产代码、依赖或 IAM/网络配置。
 
-## 未完成事项
+## 构建结束时的未完成事项（历史时点）
 
-最终只读复核：`tp_officebench_smoke`、`tp_officebench_rl_dev_ue_1`、`tp_officebench_rl_dev_ue_1_obs` 和 `tp_officebench_use2_rl_dev_2` 仍为 READY 且指向旧镜像。本轮只完成镜像构建/发布，线上运行时尚未采用修复。
+当时的最终只读复核：`tp_officebench_smoke`、`tp_officebench_rl_dev_ue_1`、`tp_officebench_rl_dev_ue_1_obs` 和 `tp_officebench_use2_rl_dev_2` 仍为 READY 且指向旧镜像。本轮只完成镜像构建/发布，线上运行时尚未采用修复。
 
-运行时部署、新失败策略真实训练验收、其余历史验证和资源去留仍需后续确认。本记录区分镜像已发布与运行时已使用，不能把构建成功当作 AC5 通过；父任务 AC4 的运行时采用/验证部分也保持开放。
+运行时部署、新失败策略真实训练验收、其余历史验证和资源去留仍需后续确认。本记录区分镜像已发布与运行时已使用，不能把构建成功当作 AC5 通过；父任务 AC4 的运行时采用/验证部分在该时点仍开放。
+
+## 后续授权部署
+
+用户随后另行批准镜像级运行时更新与 READY 核对。四个 OfficeBench runtime 和 DEFAULT 现已采用版本 2 / 新镜像，配置与标签验证未变；见 `runtime-deployment.md`。父 AC4 因实际采用与安全核验完成而勾选，但这仍不关闭真实模型/训练验收。
