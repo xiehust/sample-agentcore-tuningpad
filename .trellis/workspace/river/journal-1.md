@@ -218,3 +218,24 @@ After user confirmation, fixed only toolkit's `tests/test_rollout_entrypoint.py`
 ### Status and Next Steps
 
 Child AC1–AC4 and parent AC2 implementation verification passed. The child remains `in_progress` pending branch merge; no completed task was prematurely archived. Cloud validation, image updates and resource decisions remain open; no AWS/K8s operations were performed.
+
+## Session 7: Authorized image refresh and AWS inventory
+
+**Date**: 2026-10-10
+**Task**: 10-10-project-wrap-up (image build/publication only)
+**Branch**: `main`
+
+### Summary
+
+The user authorized AWS inventory and builds. Built one OfficeBench ARM image from toolkit `99ab5d7dee`, published it to us-east-1 and us-east-2, and built one FSDP trainer in us-east-1 using the existing CodeBuild project. No runtime deployment, GPU scale-up, training or existing-resource deletion was performed.
+
+### Results and Verification
+
+- [OK] AWS identity matches the project. Both EKS clusters remain ACTIVE; eight EC2 GPU groups have zero desired/actual instances, while two HyperPod CPU system nodes remain. Baseline infrastructure is not fully stopped.
+- [OK] OfficeBench tags `ag-98f339686d-99ab5d7dee` / `ag-31d8456654-99ab5d7dee`: same verified ARM manifest, source hashes match, local `/ping` is Healthy, Agent ledger entries ready; temporary probe removed.
+- [OK] CodeBuild `tuningpad-trainer-build:348448ba-a480-4330-97b0-07d4a2e7ae35` succeeded. `fsdp-99ab5d7dee` is amd64; uploaded source checksum and build-log push digest match S3/ECR; trainer ledger ready.
+- [OK] Bounded operation self-tests, independent read-only operation review, and `make verify`. Full provenance and region-specific digests are in `.trellis/tasks/10-10-project-wrap-up/build-operations.md`.
+
+### Status and Next Steps
+
+Final AWS reads confirm OfficeBench training, observed-eval and standalone runtimes still reference their old images. Image publication is complete, runtime adoption and real rollout AC5 are not. Deployment/model invocation/GPU tests require further approval; actual bill charges were not queried. No Megatron or second-region trainer rebuild was launched.

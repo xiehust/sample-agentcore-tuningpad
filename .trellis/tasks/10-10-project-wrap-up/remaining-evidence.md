@@ -1,8 +1,8 @@
 # 剩余事项证据复核 — 2026-10-10
 
-## 检查边界
+## 初次检查边界（云端构建前）
 
-只读本地代码、Git、Trellis 记录、SQLite ledger 和指定 job 日志；未查询 AWS/K8s。ledger 的状态和更新时间是历史证据，不代表云端实时状态。
+下列初次复核只读本地代码、Git、Trellis 记录、SQLite ledger 和指定 job 日志，未查询 AWS/K8s；ledger 当时的状态不代表云端实时状态。用户后续批准云端盘点与构建后的结果见本文末尾及 `build-operations.md`，不把构建前快照当作当前状态。
 
 ## OfficeBench 与自动恢复
 
@@ -19,7 +19,7 @@
 
 独立只读复核 tracked docs/Git 未发现上述成功链的完整记录；本轮补充的证据来自 local ledger 和指定 job 日志，不从“没有文档”推断“没有跑过”。
 
-## 仍未闭环的事项
+## 构建前尚未闭环的事项
 
 - **OfficeBench agent 镜像**：ledger 中 us-east-1 镜像记录最后更新于 2026-10-09，us-east-2 于 2026-10-08，均早于 2026-10-10 toolkit 修复。尚无本地记录证明修复已部署；仍需核实云端 digest/source 后决定重建，不能仅按 ledger 时间断言线上内容。
 - **Trainer 镜像**：ledger 最近 ready 版本仍为 toolkit `0142ae2250`，没有新失败策略 revision 的构建记录。新 run 的 `ensure_image` 会按当前 revision 检查并可能触发 CodeBuild；批准 AC5 时应同时考虑构建费用。
@@ -33,4 +33,10 @@
 
 用户确认后，R1b 的单文件修复已完成；toolkit `99ab5d7` 已推送到 `fix/rollout-test-isolation`，尚未合并 main。75 个相关测试在进程内 Python/AWS 拦截验证器下通过且无违规，详见 `../10-10-toolkit-test-isolation/verification.md`。该验证不宣称 OS 级网络隔离，也不覆盖真实集成测试。
 
-首批代码 `8889a98` 和证据规划 `29c83a2` 已发布到 TuningPad `origin/main`。其余事项继续保持开放，特别是原失败策略 AC5、镜像更新和费用/资源决策；下一步真实云端查询和有费用的执行需要明确授权。
+首批代码 `8889a98` 和证据规划 `29c83a2` 已发布到 TuningPad `origin/main`。其余事项继续保持开放，特别是原失败策略 AC5、运行时采用新镜像和费用/资源决策。
+
+## 后续已授权构建结果
+
+用户随后授权 AWS 只读盘点与构建。OfficeBench 新 ARM 镜像已在两区发布，主区域 us-east-1 的 FSDP trainer `fsdp-99ab5d7dee` 已构建并验证 ready；此前“没有新镜像”只适用于构建前快照。源码 hash、构建日志/ECR digest、架构和本机 health 验证见 `build-operations.md`。
+
+运行时仍使用旧镜像，没有执行部署或真实训练验收。两个集群仍存在，GPU 节点组均为 0，但 CPU system 节点与基础设施仍在；未查询实际账单或决定资源去留。Megatron/第二地区 trainer 未重复构建。

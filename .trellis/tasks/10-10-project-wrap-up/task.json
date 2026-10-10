@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：首批 B1–B4 已发布（8889a98）；剩余证据复核见 remaining-evidence.md。R1b 测试隔离实现验收完成：toolkit 99ab5d7 已推送 fix/rollout-test-isolation，75 个相关离线测试通过、验证器零违规，待合并 main。父 AC2 已勾选；AC3–AC6 与原失败策略 AC5 仍开放。仅修改 toolkit 测试文件，无生产代码/依赖/云资源变更。",
+  "notes": "2026-10-10：首批 B1–B4 已发布；R1b 修复分支99ab5d7已验证待合并。用户后续授权AWS盘点和构建：OfficeBench同一ARM镜像已发布两区、Agent记录ready；us-east-1 FSDP镜像fsdp-99ab5d7dee已通过CodeBuild及来源/digest/架构核验。未部署运行时，未扩容/训练/删除；AC3–AC6与原失败策略AC5继续开放。详见build-operations.md。",
   "meta": {}
 }

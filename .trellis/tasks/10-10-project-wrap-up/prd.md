@@ -9,7 +9,7 @@
 - 2026-10-10：用户先同意建立收尾任务，随后确认首批范围为“TuningPad 的错误提示本地化和记录同步”；暂不修改 toolkit、不做云端操作。
 - 首批只覆盖 R1a、R4a、R4b，由本任务直接承载；其余需求仍为后续跟踪，不因首批完成而关闭。首批设计和执行计划见 `design.md`、`implement.md`。
 - 用户已最终确认首批方案，并要求改用 Playwright CLI 验收。首批 B1–B4 已完成。随后用户明确要求 commit/push 并继续其余事项；首批提交 `8889a98` 已推送至 `origin/main`。
-- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。真实云端操作仍需单独批准费用；其他缺口见 `remaining-evidence.md`。
+- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。随后用户明确授权 AWS 只读盘点与镜像构建：OfficeBench 两区发布和 us-east-1 FSDP 构建已完成，详见 `build-operations.md`。运行时部署、GPU 扩容、训练和删除未获本轮授权；其他缺口见 `remaining-evidence.md`。
 - 原任务 `../10-10-rollout-failure-policy/prd.md` 继续拥有失败策略的 AC1–AC5；本任务引用其结果，不重复执行或提前归档。
 
 ## Requirements
@@ -22,7 +22,7 @@
 ### R2 当前功能的部署与真实验收
 
 - **R2a Rollout failure policy AC5**：原任务 AC1–AC4 已勾选，AC5 未完成。需单独批准后，以小规模训练注入部分 agent 异常，确认异常样本被丢弃、同组其他样本继续训练、health 图有指标且 step 完成。证据：`../10-10-rollout-failure-policy/prd.md:60-64`。未经真实验收，不能据离线测试声称该行为已在 Ray/GPU 环境成立。
-- **R2b OfficeBench 镜像更新**：最后日志仍要求重建 agent 镜像，使空回复 `IndexError` 修复生效。agent 镜像不随 toolkit revision 自动重建；本次未查询线上镜像。先确认当前镜像是否已包含修复，再决定是否请求 CodeBuild/部署授权，不能盲目重复构建。证据：原任务 PRD 的 R7、`.trellis/workspace/river/journal-1.md:153`。
+- **R2b OfficeBench 镜像更新（构建发布完成，待部署）**：已核对 AWS 并构建包含修复的 ARM 镜像，两区 ECR 发布、源码哈希和 `/ping` 验证通过，Agent 记录指向 `*-99ab5d7dee`。但训练/评测/standalone 运行时仍指向旧镜像，本轮没有部署或调用模型，不能声称线上空回复问题已修复。详情见 `build-operations.md`。
 
 ### R3 历史验证缺口（先核实证据，不直接当作功能缺陷）
 
@@ -37,7 +37,7 @@
 - **R4a 任务状态**：审计时 `../10-10-rollout-failure-policy/task.json:6` 仍为 `planning`，与已交付代码及 AC1–AC4 不一致。首批已改为 `in_progress` 并补充说明；AC5 仍未完成，`completedAt` 仍为 null，没有归档。
 - **R4b 过期记录**：把下文已结案项目与当前待办区分清楚；保留历史日志的时点语义，用后续说明替代将历史改写为当下事实。
 - **R4c 提交发布（首批已完成）**：用户随后明确授权 commit/push。已 fetch 并确认远端无分叉，提交 `8889a98`，连同此前本地未推送历史成功推送至 `origin/main`；推送后核对 ahead/behind 均为 0。后续材料按用户本次发布授权提交。
-- **R4d 云资源善后**：旧日志中的 `rl-dev-2` 保留/删除决策尚未找到结案证据（`.trellis/workspace/river/journal-1.md:110`）。本次没有查询 AWS，不能声称资源仍存在或仍计费。确认现状、费用和保留意图后再决定操作；本任务不授权删除资源。
+- **R4d 云资源善后（已盘点，去留待定）**：AWS 核实两个 EKS 集群仍为 ACTIVE，8 个 EC2 GPU 组 desired/实际实例总数均为 0，两个 HyperPod CPU system 节点仍在。基础设施费用未完全停止，但本轮未查询账单，也未获得资源删除授权。见 `build-operations.md`；保留/删除决策仍开放。
 
 ## Acceptance Criteria
 
@@ -68,6 +68,6 @@
 ## Out of Scope
 
 - 首批实现不修改 sibling toolkit，不执行 AC5 或其他真实验收，不重建/部署镜像，不决定云资源去留，不归档仍有验收缺口的任务。首批实现时的“不提交/push”限制已被用户后续的明确发布授权取代。
-- 不启动应用连接真实账号，不执行 CloudFormation、CodeBuild、GPU 扩容、镜像部署、资源删除或其他云端操作。
+- 用户后续授权仅扩展到 AWS 只读盘点、OfficeBench 镜像构建/ECR 发布，以及 us-east-1 FSDP CodeBuild。不得据此执行 CloudFormation、运行时部署、GPU 扩容、训练、资源删除或其他未批准操作。
 - 不修改后台错误码、训练失败保护、重试逻辑、API/数据库契约、鉴权或费用确认；不扩大到新训练功能、异步 rollout failure policy 或控制台新增配置项。
 - 不全面补译所有历史后台错误码；只复用已有错误本地化能力，并新增本次遗漏的 key。
