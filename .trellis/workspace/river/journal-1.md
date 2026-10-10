@@ -109,3 +109,47 @@ Archived 10-07-training-param-defaults (code in a60bdeb) and back-filled the 10-
 
 - Decide whether to keep or delete cluster rl-dev-2 (us-east-2)
 - Real validation still missing (needs cost approval): HyperPod instance-group GPU path, guardian/auto-resume in cluster, Megatron, OfficeBench training
+
+
+## Session 4: Eval traces AC4 live acceptance; rollout failure policy
+<!-- trellis-session: v=2 fp=7b05addeafeb829d -->
+
+**Date**: 2026-10-10
+**Task**: Eval traces AC4 live acceptance; rollout failure policy
+**Branch**: `main`
+
+### Summary
+
+Closed 10-09-eval-observability with a live AC4 run (ev-916804751a on a g6.2xlarge Qwen3.5-4B endpoint): the eval-only _obs runtime emitted 283 spans and the training runtime 0; real-data browser QA found and fixed overlapping time-axis labels and overflowing exception titles. Started 10-10-rollout-failure-policy: non-model rollout failures no longer train at reward 0. The toolkit half was delegated to the agentcore-rl-toolkit darwin (feat/rollout-failure-policy @ 2788cd3, local only, its verl/gateway/OfficeBench tests re-run here). TuningPad passes the loop policy through from templates, charts the trainer's per-step failure counters, and fails a run without a checkpoint resume when the drop guard trips.
+
+### Main Changes
+
+- Eval endpoint ep-428280d38d deleted and ec2-g6-serve scaled to 0 after AC4; the _obs runtime is kept (idle, usage-billed)
+- Per-rollout [rollout-failure] log parsing was built and then removed: Ray driver log dedup undercounts; step-line counters are used instead
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d24903` | fix(runs): scale down per pool, page logs by bytes, run megatron |
+| `e9ee6a3` | feat(evals): per-sample transcripts and AgentCore trace waterfall |
+| `a9db316` | docs(spec): record pool, log and megatron lessons; eval traces plan |
+| `6c48dc8` | fix(evals): keep long trace axis and exception titles readable |
+| `0bfece6` | feat(runs): surface rollout failure policy and stop guard retries |
+| `c14d29a` | docs(spec): record eval trace and rollout failure conventions |
+
+### Testing
+
+- [OK] make verify PASS (ruff, pytest, eslint, build, i18n)
+- [OK] toolkit: tests/backends/verl 138 passed; tests/examples/test_officebench_rl_app.py + tests/rollout_gateway 111 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- AC5 of 10-10-rollout-failure-policy: small live GSM8K run with an injected agent error (needs cost approval)
+- Rebuild the OfficeBench agent image so the rl_app.py IndexError fix takes effect
+- Decide whether to push/PR toolkit branch feat/rollout-failure-policy; toolkit test_rollout_entrypoint.py reached real S3 (AccessDenied) — pre-existing hermeticity issue
+- V4 Megatron GPU validation still pending p5 capacity
