@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TuningPad 核心逻辑中文源码导读：控制面、任务状态、训练链路、前端反馈与安全边界。">
+  <title>TuningPad 核心逻辑 · 中文源码导读</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #203344; --muted: #4e6170; --accent: #006b67;
+      --paper: #fff; --canvas: #f3f5f4; --line: #ccd7d7;
+      --tint: #eef7f5; --warn: #895009; --warn-bg: #fff8e9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 16px; line-height: 1.85;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--canvas); overflow-wrap: anywhere; }
+    a { color: var(--accent); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+    a:hover { text-decoration-thickness: 2px; }
+    a:focus-visible, [tabindex]:focus-visible { outline: 3px solid #a44c00; outline-offset: 4px; border-radius: 2px; }
+    .skip-link { position: absolute; top: -6rem; left: 1rem; z-index: 10; background: #fff; padding: .6rem 1rem; }
+    .skip-link:focus { top: 1rem; }
+    .hero { max-width: 1260px; margin: 0 auto; padding: 4rem 2.5rem 2.5rem; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--accent); font-size: .78rem; font-weight: 750; letter-spacing: .14em; margin: 0 0 .7rem; }
+    h1 { margin: .2rem 0 1.2rem; font-size: clamp(2rem, 4.5vw, 3.3rem); line-height: 1.25; letter-spacing: -.03em; }
+    .subtitle { max-width: 54rem; margin: 0 0 1.4rem; font-size: 1.15rem; color: var(--muted); }
+    .snapshot { font-size: .87rem; max-width: 66rem; }
+    .snapshot code { font-size: .9em; }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 2rem; max-width: 1260px; margin: 0 auto; padding: 2.3rem 2.5rem 4rem; }
+    .toc { position: sticky; top: 1.5rem; align-self: start; font-size: .85rem; max-height: calc(100vh - 3rem); overflow-y: auto; padding: .7rem .7rem 1rem 0; }
+    .toc ol { padding-left: 1.65rem; margin: .6rem 0 1rem; }
+    .toc li { padding: .24rem 0 .24rem .2rem; }
+    .toc a { text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .back-top { display: inline-block; border-top: 1px solid var(--line); padding-top: .6rem; }
+    main, article, section, .card, .diagram-grid > * { min-width: 0; }
+    article > section { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 2rem; margin: 0 0 1.7rem; scroll-margin-top: 1.5rem; }
+    h2 { margin: 0 0 1.3rem; font-size: 1.6rem; line-height: 1.4; }
+    .section-no { display: block; color: var(--accent); font-size: .8rem; letter-spacing: .14em; margin-bottom: .25rem; }
+    h3 { margin: 1.8rem 0 .6rem; font-size: 1.15rem; line-height: 1.5; }
+    h4 { margin: 1.2rem 0 .4rem; font-size: 1rem; }
+    p { margin: .7rem 0; }
+    li + li { margin-top: .35rem; }
+    ul, ol { padding-left: 1.45rem; }
+    strong { font-weight: 750; }
+    code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: .9em; }
+    code { background: #edf2f3; padding: .08em .3em; border-radius: 3px; overflow-wrap: anywhere; white-space: normal; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; border: 1px solid var(--line); border-radius: 6px; background: #f6f8f8; line-height: 1.7; max-width: 100%; }
+    pre code { background: none; padding: 0; font-size: 1em; }
+    .lead { font-size: 1.05rem; }
+    .note, .warning, .boundary { padding: .8rem 1rem; margin: 1.2rem 0; border-left: 4px solid var(--accent); background: var(--tint); border-radius: 0 6px 6px 0; }
+    .warning { background: var(--warn-bg); border-color: var(--warn); }
+    .boundary { border: 1px dashed var(--muted); background: #f7f8fa; border-radius: 6px; }
+    .note p:first-child, .warning p:first-child, .boundary p:first-child { margin-top: 0; }
+    .note p:last-child, .warning p:last-child, .boundary p:last-child { margin-bottom: 0; }
+    .label { font-size: .8rem; font-weight: 750; letter-spacing: .03em; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.2rem 0; }
+    .card { padding: 1rem; background: #f6f9f9; border: 1px solid var(--line); border-radius: 7px; }
+    .card h3 { margin-top: 0; }
+    .sources { margin: .9rem 0 1.2rem; color: var(--muted); font-size: .8rem; line-height: 1.75; }
+    .sources a { display: block; margin: .3rem 0; }
+    .source-ref { overflow-wrap: anywhere; word-break: normal; }
+    .table-wrap { max-width: 100%; margin: 1.1rem 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .89rem; line-height: 1.75; }
+    caption { text-align: left; padding: .8rem; font-weight: 750; background: #f4f8f8; }
+    th, td { vertical-align: top; text-align: left; padding: .75rem; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+    thead th { background: #eaf2f2; font-weight: 750; }
+    tbody th { font-weight: 700; }
+    td .source-ref, th .source-ref { display: block; margin-top: .4rem; font-size: .83em; }
+    td p:first-child { margin-top: 0; }
+    tr:nth-child(even) td, tr:nth-child(even) th { background: #fafcfc; }
+    figure { margin: 1.4rem 0; }
+    .diagram-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; align-items: start; }
+    svg { display: block; width: 100%; height: auto; max-width: 100%; background: #f7faf9; border: 1px solid var(--line); border-radius: 8px; }
+    svg text { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #203344; font-size: 17px; }
+    svg .diagram-title { font-size: 19px; font-weight: 750; }
+    svg .diagram-small { font-size: 15px; }
+    svg .box { fill: #fff; stroke: #93aaa9; stroke-width: 1.5; }
+    svg .accent-box { fill: #e7f4f0; stroke: #006b67; stroke-width: 1.5; }
+    svg .external-box { fill: #fff; stroke: #63747c; stroke-dasharray: 6 4; stroke-width: 1.5; }
+    svg .arrow { fill: none; stroke: #315d65; stroke-width: 2; }
+    svg .data-arrow { fill: none; stroke: #315d65; stroke-width: 2; stroke-dasharray: 2 4; }
+    svg .guard-arrow { fill: none; stroke: #895009; stroke-width: 2; stroke-dasharray: 7 5; }
+    figcaption { color: var(--muted); font-size: .85rem; margin-top: .7rem; }
+    .equivalent { padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 6px; margin-top: 1rem; font-size: .91rem; }
+    .equivalent ol { margin-bottom: .3rem; }
+    .flow { background: #f2f7f6; border: 1px solid var(--line); border-radius: 5px; padding: .6rem .8rem; line-height: 2; }
+    .sequence-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; max-width: 480px; margin-inline: auto; }
+    .glossary dt { font-weight: 750; margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .65rem; }
+    .glossary dd { margin: .35rem 0 .8rem; }
+    .page-footer { max-width: 1260px; margin: 0 auto; padding: 1.5rem 2.5rem 3rem; border-top: 1px solid var(--line); font-size: .8rem; color: var(--muted); }
+    @media (max-width: 1000px) {
+      .layout { grid-template-columns: 180px minmax(0, 1fr); gap: 1.2rem; padding-right: 1.4rem; padding-left: 1.4rem; }
+      article > section { padding: 1.5rem; }
+      .diagram-grid { grid-template-columns: minmax(0, 1fr); }
+      .diagram-grid svg { max-width: 460px; margin-inline: auto; }
+    }
+    @media (max-width: 760px) {
+      .hero { padding: 2rem 1rem 1.5rem; }
+      .layout { display: block; padding: 1rem .75rem 2rem; }
+      .toc { position: static; max-height: none; overflow: visible; padding: .6rem .6rem 1.4rem; }
+      .toc ol { columns: 2; column-gap: 1.5rem; }
+      .toc li { break-inside: avoid; }
+      article > section { padding: 1.3rem 1rem; border-radius: 8px; }
+      h2 { font-size: 1.4rem; }
+      .cards { grid-template-columns: minmax(0, 1fr); }
+      table { font-size: .82rem; }
+      th, td { padding: .6rem .45rem; }
+      .page-footer { padding: 1.3rem 1rem 2rem; }
+    }
+    @media (max-width: 400px) {
+      .toc ol { columns: 1; }
+      .snapshot { font-size: .82rem; }
+      article > section { padding: 1.2rem .8rem; }
+      .note, .warning, .boundary { padding: .7rem .75rem; }
+    }
+    @page { margin: 16mm 14mm; }
+    @media print {
+      :root { font-size: 10pt; line-height: 1.6; }
+      body { background: #fff; color: #111; }
+      .hero, .layout, .page-footer { max-width: none; padding: 0; margin: 0; }
+      .hero { padding-bottom: 12pt; }
+      .layout { display: block; }
+      .toc, .skip-link, .back-top, .page-footer a { display: none; }
+      article > section { border: 0; border-radius: 0; padding: 14pt 0 8pt; margin: 0; }
+      h1 { font-size: 25pt; } h2 { font-size: 17pt; } h3 { font-size: 12pt; }
+      h2, h3, h4, caption { break-after: avoid; }
+      p, li { orphans: 3; widows: 3; }
+      a { color: #111; text-decoration: underline; }
+      .table-wrap { overflow: visible; border-radius: 0; }
+      table { font-size: 9pt; } thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+      th, td { padding: 5pt; }
+      .diagram-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8pt; }
+      .diagram-grid svg { max-width: 100%; }
+      svg { break-inside: avoid; }
+      figure, .card, .note, .warning, .boundary { break-inside: avoid; }
+      .sequence-figure { break-inside: auto; }
+      .sequence-panels { display: block; max-width: 108mm; }
+      .sequence-panels svg { margin: 0 auto 10pt; break-inside: avoid; }
+      .glossary dt { break-after: avoid; }
+      .note, .warning, .boundary, .card { background: #fff; border-color: #666; }
+      pre { white-space: pre-wrap; overflow: visible; }
+      .sources { font-size: 8pt; }
+      .page-footer { margin-top: 15pt; padding-top: 8pt; }
+    }
+  </style>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="hero">
+    <p class="eyebrow">TUNINGPAD / SOURCE READING GUIDE</p>
+    <h1>从控制台操作，读懂一次训练</h1>
+    <p class="subtitle">一份面向中文维护者的核心逻辑导读：先看谁负责什么，再沿着台账、长任务和训练产物穿过系统。本文解释代码，不替代部署手册。</p>
+    <div class="snapshot">
+      <p><strong>源码快照：</strong><code>f7c2b94aa91d8281ae6c03088fe6e212daf3a160</code>。路径与行号对应此 commit；后续版本请结合符号重新定位。读者可先顺读 01–05 建立模型，再用 06–09 跟踪 Run，最后查安全边界与源码地图。</p>
+      <p><strong>证据范围：</strong>“实现”指本仓库静态源码；“测试断言”只说明测试检查了什么，不等于云端验证；“静态风险”指从分支推导、未复现的可能性；模板中的“verified”属于历史声明。toolkit、verl、远程模板及真实 AWS/K8s 行为属于外部边界，本次未审计或实测，不承诺训练收益、性能或账单上限。</p>
+      <p><strong>离线使用：</strong>本页无需前后端、JavaScript 或网络。单独复制 HTML 仍可读全文和图表；“源码”链接依赖保留 <code>docs/</code> 与仓库目录的相对布局。链接只打开文件，可能由浏览器展示或下载；可见行号供手工定位，不使用虚假的本地跳行锚点。</p>
+    </div>
+    <aside class="warning" aria-label="先记住三个边界">
+      <p><strong>先记住：</strong>Job ≠ stage ≠ Run；数据库是台账而非云状态的最终真相；停止本地服务不等于停止云训练或清理计费资源。恢复、取消、deadline 与 guardian 都有条件，不能合并理解为“自动兜底一切”。详见 <a href="#job-engine">状态语义</a>、<a href="#recovery">恢复与清理</a>、<a href="#safety-tests">费用与安全</a>。</p>
+    </aside>
+  </header>
+  <div class="layout">
+    <nav class="toc" aria-label="章节目录">
+      <p class="eyebrow">阅读路线 / CONTENTS</p>
+      <ol>
+        <li><a href="#overview">系统总览与架构介绍</a></li>
+        <li><a href="#lifecycle">启动与模块边界</a></li>
+        <li><a href="#data-model">数据模型与台账</a></li>
+        <li><a href="#job-engine">Job 引擎与状态</a></li>
+        <li><a href="#preparation">训练前的准备分支</a></li>
+        <li><a href="#planning">训练规划与参数</a></li>
+        <li><a href="#training-flow">一次 Run 的完整链路</a></li>
+        <li><a href="#frontend-flow">前端数据流与反馈</a></li>
+        <li><a href="#recovery">失败、恢复与清理</a></li>
+        <li><a href="#safety-tests">安全、费用与测试边界</a></li>
+        <li><a href="#source-map">源码地图与术语</a></li>
+      </ol>
+      <a class="back-top" href="#top">返回顶部 ↑</a>
+    </nav>
+    <main id="main">
+      <article aria-label="TuningPad 核心逻辑导读">
+        <section id="overview" aria-labelledby="overview-title">
+          <h2 id="overview-title"><span class="section-no">01</span> 系统总览与架构介绍</h2>
+          <p class="lead"><strong>TuningPad 是编排控制面，不是强化学习算法本身。</strong>它把区域资源、集群、Agent、数据集与训练配置组织成可追踪的任务；实际 GRPO（基于一组采样奖励的策略优化）训练交给 EKS 上的 Ray / verl，Agent 在 Bedrock AgentCore Runtime 中运行。</p>
+          <div class="cards">
+            <div class="card"><h3>控制面：意图与进度</h3><p>React 页面经 HTTP 提交操作；FastAPI 校验请求、记录对象，再交给后台 pipeline。SQLite 记录 ID、配置、stage 进度和指标；前端通过资源与 Job 轮询取得快照。</p></div>
+            <div class="card"><h3>训练面：计算与采样</h3><p>RayJob 承载训练。toolkit 的 AgentLoop 调用 AgentCore；Agent 的模型请求回连 rollout gateway，再到 vLLM。rollout 是 Agent 执行一条采样轨迹的过程，不是 FastAPI 接收结果的 webhook。</p></div>
+          </div>
+          <h3>1.1 逻辑分层：不是一串必须经过的微服务</h3>
+          <p>下面是代码职责，不是独立部署单元；后端各层仍在同一应用内协作。普通查询可直接返回，只有长操作才交给 Job。</p>
+          <ul>
+            <li><strong>交互与 API 边界：</strong>页面收集选择、展示快照；router 校验输入、组织响应与启动任务，不负责完成 GPU 训练。前端预览不能替代后端校验。</li>
+            <li><strong>编排层：</strong>pipeline 定义业务阶段及收尾，engine 管排队、执行与进度；它们不实现梯度计算。Job 是执行记录，Run 是训练业务对象，二者不能混作一个状态。</li>
+            <li><strong>领域与适配层：</strong>services 装配资源操作；planner 给建议，render 将计划转成脚本和 Kubernetes 对象；生成配置不代表资源已经创建，更不代表训练成功。</li>
+            <li><strong>执行层：</strong>Ray / verl 承担训练，toolkit 接入 Agent 采样，AgentCore 执行 Agent。控制面设置这些契约，不替代外部引擎的内部实现。</li>
+          </ul>
+          <p>扩展入口按责任选择，参见 <a href="#lifecycle">模块边界</a>；不要把整个系统理解为每个 HTTP 请求都经过全部阶段。</p>
+          <div class="sources" aria-label="逻辑分层源码依据">
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="146" data-line-end="196" data-symbol="defaults / preview / create">backend/app/routers/runs.py:146–196 · defaults / preview / create</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="545" data-line-end="555" data-symbol="register">backend/app/pipelines/run.py:545–555 · run.train 注册</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="324" data-line-end="365" data-symbol="JobEngine._run">backend/app/jobs/engine.py:324–365 · JobEngine._run</a>
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="30" data-line-end="109" data-symbol="render">backend/app/services/runs.py:30–109 · render 的配置装配与返回值</a>
+          </div>
+          <h3>1.2 物理部署：控制面与训练面分开在哪里</h3>
+          <div class="table-wrap"><table>
+            <caption>默认本地入口及云端落点：逻辑相邻不等于同机运行</caption>
+            <thead><tr><th scope="col">位置</th><th scope="col">职责与边界</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">浏览器</th><td>运行 React，向控制 API 发 HTTP；不在浏览器执行训练。<a class="source-ref" href="../frontend/src/main.tsx" data-line-start="12" data-line-end="18" data-symbol="createRoot">frontend/src/main.tsx:12–18 · createRoot</a><a class="source-ref" href="../frontend/src/lib/api.ts" data-line-start="45" data-line-end="58" data-symbol="request / requestForm">frontend/src/lib/api.ts:45–58 · request / requestForm</a></td></tr>
+              <tr><th scope="row">本机控制面</th><td>本地入口启动 Uvicorn / FastAPI 与前端服务；Job 线程池属于后端进程，SQLite 默认也是本地文件，并非云队列。<a class="source-ref" href="../start.py" data-line-start="63" data-line-end="83" data-symbol="main">start.py:63–83 · main 的本地启动</a><a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="168" data-line-end="178" data-symbol="JobEngine.__init__">backend/app/jobs/engine.py:168–178 · JobEngine.__init__</a><a class="source-ref" href="../backend/app/core/config.py" data-line-start="80" data-line-end="82" data-symbol="Settings.db_url">backend/app/core/config.py:80–82 · Settings.db_url</a></td></tr>
+              <tr><th scope="row">EKS 集群</th><td>CPU system 资源承载提交器与 guardian 定时任务；GPU 池承载 Ray head / workers 和训练。head 也占 GPU，不能把它当成本机后端或 CPU 提交器。<a class="source-ref" href="../backend/app/render/train.py" data-line-start="405" data-line-end="523" data-symbol="rayjob">backend/app/render/train.py:405–523 · rayjob 的资源与节点选择</a><a class="source-ref" href="../backend/app/services/components.py" data-line-start="622" data-line-end="642" data-symbol="guardian_cronjob">backend/app/services/components.py:622–642 · guardian_cronjob</a></td></tr>
+              <tr><th scope="row">独立 AgentCore Runtime</th><td>托管 Agent 容器，不是 EKS Pod；VPC（私有网络）模式用子网和安全组接入网络，不等于把 Runtime 部署进 EKS。<a class="source-ref" href="../backend/app/services/agents.py" data-line-start="396" data-line-end="406" data-symbol="network_config">backend/app/services/agents.py:396–406 · network_config</a><a class="source-ref" href="../backend/app/services/agents.py" data-line-start="478" data-line-end="506" data-symbol="deploy_runtime">backend/app/services/agents.py:478–506 · deploy_runtime</a></td></tr>
+              <tr><th scope="row">AWS 托管构建与存储</th><td>Trainer 构建源上传 S3，由 CodeBuild 构建并推送 ECR 镜像仓库；它不是训练用 GPU 上的构建阶段。S3 与 FSx 的数据职责另见 1.4。<a class="source-ref" href="../backend/app/services/trainer_image.py" data-line-start="74" data-line-end="115" data-symbol="upload_source / ensure_project / start_build">backend/app/services/trainer_image.py:74–115 · upload_source / ensure_project / start_build</a><a class="source-ref" href="../trainer_image/buildspec.yml" data-line-start="8" data-line-end="19" data-symbol="phases">trainer_image/buildspec.yml:8–19 · phases</a></td></tr>
+            </tbody>
+          </table></div>
+          <p>这条分界使 GPU 计算不占用本机训练算力，但后端仍负责 monitor 观测与控制；关闭本机不会自动停掉云任务。部署位置与生命周期应分别阅读，详见 <a href="#lifecycle">启动 / 关闭</a>、<a href="#recovery">清理</a>。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/main.py" data-line-start="24" data-line-end="40" data-symbol="create_app / lifespan">backend/app/main.py:24–40 · create_app / lifespan</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="407" data-symbol="stage_monitor">backend/app/pipelines/run.py:392–407 · stage_monitor</a>
+          </div>
+          <figure id="architecture-figure" aria-labelledby="architecture-caption">
+            <div class="diagram-grid">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 660" role="img" aria-labelledby="arch-control-title arch-control-desc">
+                <title id="arch-control-title">架构 A：浏览器与本地控制面</title>
+                <desc id="arch-control-desc">浏览器通过 HTTP 和轮询访问 FastAPI。router 连接 services 与 pipelines，由线程池 JobEngine 执行阶段并编排云资源；台账和 Job 日志在本地。没有已注册的全局 reconciler。</desc>
+                <defs><marker id="arch-control-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" fill="#315d65"/></marker></defs>
+                <text x="22" y="30" class="diagram-title">A · 浏览器与本地控制面</text>
+                <rect x="22" y="48" width="396" height="80" rx="8" class="accent-box"/>
+                <text x="42" y="79">React：AuthGate → 页面</text>
+                <text x="42" y="108">lib/api.ts：请求 / 资源与 Job 轮询</text>
+                <path d="M134 134 V180" class="arrow" marker-start="url(#arch-control-arrow)" marker-end="url(#arch-control-arrow)"/>
+                <text x="153" y="161" class="diagram-small">HTTP 请求与响应（非推送）</text>
+                <rect x="22" y="185" width="396" height="63" rx="8" class="box"/>
+                <text x="42" y="212">FastAPI / router</text>
+                <text x="42" y="235" class="diagram-small">鉴权 · 校验 · 业务对象 / Job API</text>
+                <path d="M134 248 V301" class="arrow" marker-end="url(#arch-control-arrow)"/>
+                <text x="150" y="280" class="diagram-small">调用 / 入库</text>
+                <rect x="22" y="306" width="235" height="68" rx="8" class="box"/>
+                <text x="37" y="333">services / pipelines</text>
+                <text x="37" y="358" class="diagram-small">领域操作 / 有序 stage 定义</text>
+                <path d="M134 374 V430" class="arrow" marker-end="url(#arch-control-arrow)"/>
+                <text x="150" y="406" class="diagram-small">登记 Job → 排队执行</text>
+                <rect x="22" y="435" width="235" height="82" rx="8" class="accent-box"/>
+                <text x="37" y="463">JobEngine · 线程池</text>
+                <text x="37" y="487" class="diagram-small">每 Job 顺序执行 / 持久化进度</text>
+                <text x="37" y="507" class="diagram-small">非分布式队列</text>
+                <rect x="287" y="320" width="131" height="174" rx="8" class="box"/>
+                <text x="302" y="350">SQLite 台账</text>
+                <text x="302" y="377" class="diagram-small">配置 / 标识</text>
+                <text x="302" y="401" class="diagram-small">进度 / 指标</text>
+                <text x="302" y="440">Job 日志</text>
+                <text x="302" y="465" class="diagram-small">本地文本文件</text>
+                <path d="M257 340 H281 M257 472 H281" class="data-arrow" marker-end="url(#arch-control-arrow)"/>
+                <path d="M134 517 V566" class="arrow" marker-end="url(#arch-control-arrow)"/>
+                <text x="150" y="548" class="diagram-small">AWS / K8s 工厂与适配器</text>
+                <rect x="22" y="571" width="396" height="55" rx="8" class="box"/>
+                <text x="42" y="603">编排 / 查询外部资源 → B 图</text>
+                <text x="22" y="646" class="diagram-small">reconciler 只有框架，当前无注册调用</text>
+              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 660" role="img" aria-labelledby="arch-cloud-title arch-cloud-desc">
+                <title id="arch-cloud-title">架构 B：云资源、训练与模型请求回连</title>
+                <desc id="arch-cloud-desc">控制面编排 CloudFormation、HyperPod 或 EC2 节点池、ECR 和 CodeBuild。EKS 上的 RayJob 运行 Ray、verl 与 toolkit AgentLoop，调用 AgentCore；Agent 请求回连 GPU 上的 gateway 和 vLLM。训练产物写 FSx 与 S3。独立 guardian CronJob 虚线指向节点池，按条件缩容。</desc>
+                <defs>
+                  <marker id="arch-cloud-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#315d65"/></marker>
+                  <marker id="arch-guard-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#895009"/></marker>
+                </defs>
+                <text x="22" y="30" class="diagram-title">B · AWS / EKS 与训练面</text>
+                <rect x="22" y="48" width="396" height="80" rx="8" class="box"/>
+                <text x="38" y="78">CloudFormation · HyperPod / EC2 池</text>
+                <text x="38" y="106">ECR / CodeBuild：镜像准备</text>
+                <path d="M128 128 V173" class="arrow" marker-end="url(#arch-cloud-arrow)"/>
+                <text x="147" y="158" class="diagram-small">编排资源 / 提供镜像</text>
+                <rect x="22" y="178" width="396" height="98" rx="8" class="accent-box"/>
+                <text x="38" y="207">EKS GPU 池 · RayJob</text>
+                <text x="38" y="235">Ray / verl / toolkit AgentLoop</text>
+                <text x="38" y="259" class="diagram-small">训练计算 · 发起 rollout · 消费结果</text>
+                <path d="M128 276 V341" class="arrow" marker-end="url(#arch-cloud-arrow)"/>
+                <text x="37" y="314" class="diagram-small">调用 Agent</text>
+                <rect x="22" y="346" width="212" height="80" rx="8" class="box"/>
+                <text x="37" y="379">AgentCore Runtime</text>
+                <text x="37" y="405" class="diagram-small">Agent / 工具 / 奖励</text>
+                <rect x="268" y="346" width="150" height="80" rx="8" class="box"/>
+                <text x="281" y="371">guardian</text>
+                <text x="281" y="395" class="diagram-small">独立 CronJob</text>
+                <text x="281" y="416" class="diagram-small">条件缩零</text>
+                <path d="M345 346 V282" class="guard-arrow" marker-end="url(#arch-guard-arrow)"/>
+                <text x="356" y="316" class="diagram-small">缩容</text>
+                <path d="M128 426 V475" class="arrow" marker-end="url(#arch-cloud-arrow)"/>
+                <text x="143" y="456" class="diagram-small">模型回连</text>
+                <rect x="22" y="480" width="212" height="115" rx="8" class="accent-box"/>
+                <text x="37" y="508">GPU 上的 gateway</text>
+                <text x="37" y="532" class="diagram-small">18765 · registered sessions</text>
+                <text x="37" y="560">↓ vLLM 模型推理</text>
+                <text x="37" y="582" class="diagram-small">不是 FastAPI webhook</text>
+                <rect x="268" y="480" width="150" height="115" rx="8" class="box"/>
+                <text x="281" y="507">FSx</text>
+                <text x="281" y="530" class="diagram-small">完整 checkpoint</text>
+                <text x="281" y="559">S3</text>
+                <text x="281" y="582" class="diagram-small">日志 / 索引</text>
+                <path d="M248 276 V538 H263" class="data-arrow" marker-end="url(#arch-cloud-arrow)"/>
+                <text x="272" y="458" class="diagram-small">点线：训练读写产物</text>
+                <rect x="22" y="609" width="396" height="37" rx="6" class="external-box"/>
+                <text x="35" y="633" class="diagram-small">toolkit / verl：仅接入契约，内部未审计</text>
+              </svg>
+            </div>
+            <figcaption id="architecture-caption">图 1 · 按责任分区的架构。实线及文字区分 HTTP、编排和模型回连；点线是产物读写；长虚线是 guardian 缩容；虚线边框标记外部实现。B 图为逻辑关系，AgentCore 不运行在 EKS 内。控制面不接收假想的训练结果 webhook。</figcaption>
+          </figure>
+          <div class="equivalent">
+            <strong>架构图的等价文字</strong>
+            <ol>
+              <li>浏览器的 <code>AuthGate → 页面 → lib/api.ts</code> 发起 HTTP；长任务返回 Job ID，页面之后轮询，并非后端推送事件流。</li>
+              <li>FastAPI router 处理边界校验；services 提供领域操作，pipelines 定义阶段；<code>JobEngine</code> 在线程池顺序运行单个 Job 的 stages。不同 Job 可并行，它不是分布式队列。</li>
+              <li>控制面读写 SQLite 台账和本地 Job 文本日志，调用 AWS/K8s 接口编排 CloudFormation、HyperPod / EC2 节点池、ECR / CodeBuild、RayJob 等外部资源。</li>
+              <li>Ray / verl 通过 toolkit AgentLoop 调 AgentCore。Agent 把 <code>_rollout.base_url / model_id / api_key</code> 交给模型客户端；模型请求回连 gateway（18765）再到 vLLM。内部轨迹收集、奖励返回与权重同步只按外部接入契约描述。</li>
+              <li>训练完整 checkpoint 留在 FSx；周期写到 S3 的是日志与 checkpoint 索引，显式 export 才合并模型并同步 S3。guardian 是集群内独立 CronJob，按自身规则尝试缩容，不依赖后端常驻。</li>
+            </ol>
+          </div>
+          <div class="sources" aria-label="架构源码依据">
+            <a class="source-ref" href="../frontend/src/main.tsx" data-line-start="12" data-line-end="18" data-symbol="AuthGate">frontend/src/main.tsx:12–18 · AuthGate / App 入口</a>
+            <a class="source-ref" href="../frontend/src/lib/api.ts" data-line-start="45" data-line-end="58" data-symbol="request">frontend/src/lib/api.ts:45–58 · request / requestForm</a>
+            <a class="source-ref" href="../frontend/src/lib/useJob.ts" data-line-start="9" data-line-end="35" data-symbol="useJob">frontend/src/lib/useJob.ts:9–35 · useJob 轮询</a>
+            <a class="source-ref" href="../backend/app/main.py" data-line-start="24" data-line-end="67" data-symbol="create_app">backend/app/main.py:24–67 · create_app</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="168" data-line-end="217" data-symbol="JobEngine.start">backend/app/jobs/engine.py:168–217 · JobEngine / start</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="25" data-line-end="55" data-symbol="GATEWAY_PORT / FIXED">backend/app/render/train.py:25–55 · GATEWAY_PORT / FIXED（GRPO / agentcore_sync / vLLM）</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · agent_loop_yaml 接入契约</a>
+            <a class="source-ref" href="../templates/gsm8k_math/agent/rl_app.py" data-line-start="32" data-line-end="61" data-symbol="invoke_agent">templates/gsm8k_math/agent/rl_app.py:32–61 · invoke_agent 的模型调用与奖励</a>
+          </div>
+          <aside class="boundary"><p><strong>外部边界：</strong>toolkit / verl 的内部实现不在本次审计范围。配置中的 vLLM <code>mode=async</code> 不等于整个策略更新异步；本仓库固定训练模式是 <code>agentcore_sync</code>。图中的箭头表示配置与调用责任，不表示真实网络已可达、云资源已成功部署或模型效果已验证。</p></aside>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="344" data-line-end="367" data-symbol="train_script">backend/app/render/train.py:344–367 · train_script 日志 / 索引同步与 verl 入口</a>
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="26" data-line-end="58" data-symbol="run_dir / render">backend/app/services/runs.py:26–58 · run_dir / render 的 FSx checkpoint 路径</a>
+            <a class="source-ref" href="../backend/app/services/serving.py" data-line-start="35" data-line-end="43" data-symbol="merge_job">backend/app/services/serving.py:35–43 · merge_job 显式合并与 S3 导出</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="622" data-line-end="667" data-symbol="guardian_cronjob">backend/app/services/components.py:622–667 · guardian_cronjob（每五分钟）</a>
+            <a class="source-ref" href="../cluster_assets/guardian.py" data-line-start="151" data-line-end="182" data-symbol="main">cluster_assets/guardian.py:151–182 · main 缩零分支与 S3 账本</a>
+          </div>
+          <h3>1.3 三条跨层流：控制请求、模型请求、产物读写</h3>
+          <ol>
+            <li><strong>管理控制流：</strong>浏览器提交配置 → API 校验并保存 Run / Job → 后台调用 AWS / K8s 编排资源。返回 ID 表示任务已登记，不是训练已完成；后端查询云状态，浏览器再轮询台账。详见 <a href="#job-engine">任务语义</a>、<a href="#frontend-flow">前端反馈</a>。</li>
+            <li><strong>训练采样流：</strong>Ray / verl 经 toolkit 调用 AgentCore → Agent 根据 <code>_rollout</code> 参数请求训练侧 gateway（模型请求入口）→ vLLM 推理；结果与奖励按 toolkit 契约交回训练侧。此流不穿过 FastAPI。回连依赖 VPC 网络，代码添加 AgentCore 安全组到 gateway 18765 的规则，但不证明实际可达；网关进程内部属于外部 toolkit，不能据此另画一个托管网关服务。详见 <a href="#training-flow">训练链路</a>、<a href="#safety-tests">网络边界</a>。</li>
+            <li><strong>产物数据流：</strong>训练脚本将 S3 数据拉到 FSx；训练写 checkpoint，并把日志 / 索引同步回 S3。后端读日志、解析指标写入 SQLite，页面读取摘要；模型权重并不随管理 API 轮询传给浏览器。</li>
+          </ol>
+          <div class="sources" aria-label="跨层流程源码依据">
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="263" data-line-end="318" data-symbol="_submit / _ingest_metrics">backend/app/pipelines/run.py:263–318 · _submit / _ingest_metrics</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · agent_loop_yaml</a>
+            <a class="source-ref" href="../templates/gsm8k_math/agent/rl_app.py" data-line-start="32" data-line-end="61" data-symbol="invoke_agent">templates/gsm8k_math/agent/rl_app.py:32–61 · invoke_agent</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="322" data-line-end="339" data-symbol="ensure_security_groups">backend/app/services/components.py:322–339 · ensure_security_groups</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="320" data-line-end="367" data-symbol="train_script">backend/app/render/train.py:320–367 · train_script 的数据拉取与进度同步</a>
+          </div>
+          <h3>1.4 三种存储：不是同一份数据的三套副本</h3>
+          <p><strong>SQLite 是控制台台账：</strong>保存配置、外部标识、阶段进度、解析后的指标与日志游标，不保存云资源本身，也不是模型文件仓库。<strong>FSx 是训练侧共享文件系统：</strong>挂载为 <code>/fsx</code>，承载模型缓存、暂存数据及完整 checkpoint（恢复训练所需的检查点）。<strong>S3 是对象存储：</strong>承担构建输入、数据集与跨边界产物交换，不是运行中的共享目录。</p>
+          <p>尤其要区分：训练同步的 checkpoint <em>索引</em>只是目录清单；显式 export 才合并选中 checkpoint 并将模型同步 S3。这不是 FSx 检查点的自动完整备份。实体关系见 <a href="#data-model">数据模型</a>，导出路径见 <a href="#recovery">产物分支</a>。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/core/db.py" data-line-start="1" data-line-end="2" data-symbol="module ledger contract">backend/app/core/db.py:1–2 · 台账职责声明</a>
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="26" data-line-end="58" data-symbol="run_dir / render">backend/app/services/runs.py:26–58 · run_dir / render 的文件路径</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="503" data-line-end="535" data-symbol="ensure_fsx_pvc">backend/app/services/components.py:503–535 · ensure_fsx_pvc 的共享卷</a>
+            <a class="source-ref" href="../backend/app/services/serving.py" data-line-start="35" data-line-end="43" data-symbol="merge_job">backend/app/services/serving.py:35–43 · merge_job 的显式导出</a>
+          </div>
+          <h3>1.5 从实现可见的取舍与扩展限制</h3>
+          <p>以下是静态实现的收益 / 限制归纳，不是对作者历史决策意图的推测：</p>
+          <ul>
+            <li><strong>本地线程池 + 台账：</strong>无需另部署消息队列，重启可从未完成阶段重跑；代价是长时间 monitor 占用工作线程，任务执行依赖后端进程。</li>
+            <li><strong>恢复不等于高可用：</strong>引擎没有跨实例任务锁或领取租约；进程内锁不能协调多个后端。不能据此宣称 HA（高可用）或 exactly-once（恰好执行一次），直接增加后端副本不是安全扩容方案。</li>
+            <li><strong>字段不等于隔离：</strong><code>workspace_id</code> 虽存在，当前查询并未形成租户访问边界。多租户需另行设计鉴权与数据 / 资源隔离，不能仅启用该字段。</li>
+            <li><strong>启发式规划：</strong>纯函数按模型与实例参数给可解释建议，便于预览；它不验证真实空闲容量或完整显存需求，不保证配置可运行、更不保证收益。详见 <a href="#planning">规划与参数</a>；恢复边界见 <a href="#job-engine">Job 引擎</a>。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="247" data-line-end="254" data-symbol="JobEngine.resume_pending">backend/app/jobs/engine.py:247–254 · JobEngine.resume_pending（结合上文线程池与 _run）</a>
+            <a class="source-ref" href="../backend/app/core/db.py" data-line-start="31" data-line-end="37" data-symbol="TimestampMixin">backend/app/core/db.py:31–37 · TimestampMixin</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="211" data-line-end="225" data-symbol="list_runs">backend/app/routers/runs.py:211–225 · list_runs 的未按 workspace 过滤查询</a>
+            <a class="source-ref" href="../backend/app/planner.py" data-line-start="63" data-line-end="183" data-symbol="plan">backend/app/planner.py:63–183 · plan</a>
+          </div>
+        </section>
+        <section id="lifecycle" aria-labelledby="lifecycle-title">
+          <h2 id="lifecycle-title"><span class="section-no">02</span> 启动与模块边界</h2>
+          <p class="lead">先把“启动本地控制台”与“创建云资源”分开。入口脚本管理进程；HTTP 请求和后台 stages 才承载业务操作。下面是行为解释，不是要求执行这些命令。</p>
+          <h3>2.1 本地进程与后端 lifespan</h3>
+          <ol>
+            <li><code>start.py</code> 默认以独立进程组启动 Uvicorn（<code>--reload</code>，默认 8100）与 Vite（默认 5180），将 PID 和进程输出写到本地 <code>.run/</code>，再轮询 HTTP 就绪。<code>--prod</code> 分支先构建 UI，改用 Vite preview，Uvicorn 不再 reload；该参数本身不是 HTTPS 或生产安全部署方案。</li>
+            <li><code>create_app()</code> 装配路由、鉴权与异常处理。进入 lifespan 后先 <code>validate_startup → init_db → _load_modules</code>；开启后台工作时恢复未结束 Job，再调用 <code>start_reconcilers()</code>。退出时调用引擎 shutdown。</li>
+            <li><code>stop.sh</code> 读取已记录的进程组 PID，发送 TERM 并删除 PID 文件。它没有云清理调用，也不逐项取消 Run。<code>JobEngine.shutdown()</code> 取消尚未开始的 futures，不强制打断已运行 stage。</li>
+          </ol>
+          <aside class="warning"><p><strong>停止本地 ≠ 清理云端。</strong>RayJob、GPU 池、AgentCore、FSx 等不会因 <code>stop.sh</code> 自动销毁。后端 monitor 停止观察，不代表云端计算停止；资源清理必须另看 <a href="#recovery">业务清理分支</a> 和 <a href="#safety-tests">独立保护的条件</a>。</p></aside>
+          <div class="sources">
+            <a class="source-ref" href="../start.py" data-line-start="26" data-line-end="95" data-symbol="_spawn / main">start.py:26–95 · _spawn / _wait_http / main</a>
+            <a class="source-ref" href="../stop.sh" data-line-start="1" data-line-end="10" data-symbol="process-group stop loop">stop.sh:1–10 · 进程组停止循环</a>
+            <a class="source-ref" href="../backend/app/main.py" data-line-start="19" data-line-end="71" data-symbol="create_app / lifespan">backend/app/main.py:19–71 · _load_modules / create_app / lifespan</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="247" data-line-end="282" data-symbol="resume_pending / shutdown / start_reconcilers">backend/app/jobs/engine.py:247–282 · resume_pending / shutdown / start_reconcilers</a>
+          </div>
+          <h3>2.2 各层负责什么</h3>
+          <div class="table-wrap"><table>
+            <caption>一条长任务调用链中的职责，不是必须经过的万能流水线</caption>
+            <thead><tr><th scope="col">位置</th><th scope="col">承担的责任与阅读重点</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>routers/</code></th><td>请求模型、校验、响应与排队入口。例如 create Run 先确认费用并提交 Run，再创建 Job；不是在 HTTP 连接中等待整个训练结束。<a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="163" data-line-end="196" data-symbol="create">backend/app/routers/runs.py:163–196 · create</a></td></tr>
+              <tr><th scope="row"><code>services/</code> 与 <code>render/</code></th><td>领域读写、外部资源适配与对象装配。Run 服务将 plan、params、数据位置和模板 loop 传给渲染器，得到脚本、ConfigMap 与 RayJob。<a class="source-ref" href="../backend/app/services/runs.py" data-line-start="30" data-line-end="108" data-symbol="render">backend/app/services/runs.py:30–108 · render</a></td></tr>
+              <tr><th scope="row"><code>pipelines/</code> 与 <code>jobs/engine.py</code></th><td>前者给出有序阶段和业务 finish hook；后者处理线程池、状态、持久化 context、协作取消、日志和重跑。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="545" data-line-end="555" data-symbol="register">backend/app/pipelines/run.py:545–555 · run.train 注册</a><a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="324" data-line-end="375" data-symbol="JobEngine._run">backend/app/jobs/engine.py:324–375 · JobEngine._run</a></td></tr>
+              <tr><th scope="row"><code>core/aws.py</code> / <code>core/k8s.py</code></th><td>集中建立控制面客户端并提供测试替换接缝；AWS resource tags 也在 core 层统一组装。不能把工厂存在等同于所有外部依赖均被网络隔离。<a class="source-ref" href="../backend/app/core/aws.py" data-line-start="26" data-line-end="68" data-symbol="client / set_factory / tags">backend/app/core/aws.py:26–68 · client / set_factory / tags</a><a class="source-ref" href="../backend/app/core/k8s.py" data-line-start="56" data-line-end="87" data-symbol="api_client">backend/app/core/k8s.py:56–87 · _default_factory / api_client</a></td></tr>
+            </tbody>
+          </table></div>
+          <p><strong>两套注册要分别找：</strong>router inclusion 决定 HTTP 可达，pipeline import 决定 Job type 可用。<code>pipelines/__init__.py</code> 导入各模块触发 <code>register</code>；部分 router 导入也会提前触发它，不能说注册只在 lifespan 发生。<code>start_background=False</code> 只关闭自动恢复 / reconciler 启动及对应 shutdown，不阻止 HTTP 请求主动创建 Job。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/routers/__init__.py" data-line-start="8" data-line-end="38" data-symbol="register_all">backend/app/routers/__init__.py:8–38 · register_all</a>
+            <a class="source-ref" href="../backend/app/pipelines/__init__.py" data-line-start="1" data-line-end="3" data-symbol="pipeline imports">backend/app/pipelines/__init__.py:1–3 · pipeline 模块导入</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="14" data-line-end="15" data-symbol="pipeline imports">backend/app/routers/runs.py:14–15 · pipeline 导入副作用</a>
+          </div>
+          <h3>2.3 配置、脚本与控制台之外的资产</h3>
+          <p>配置优先级从高到低为：<strong>构造参数 → <code>TUNINGPAD_*</code> 环境变量 → YAML → 默认值</strong>。<code>Settings</code> 默认 loopback、SQLite 和相邻 toolkit checkout；公开 example 仅展示字段。本导读未读取真实 YAML、凭据或运行目录。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/core/config.py" data-line-start="38" data-line-end="82" data-symbol="Settings / settings_customise_sources">backend/app/core/config.py:38–82 · Settings / settings_customise_sources</a>
+            <a class="source-ref" href="../config/tuningpad.example.yaml" data-line-start="1" data-line-end="7" data-symbol="example settings">config/tuningpad.example.yaml:1–7 · default_region 等公开示例键</a>
+          </div>
+          <ul>
+            <li><strong>Makefile / scripts：</strong><code>install</code> 包装 uv / npm 安装，<code>dev / stop / backend / frontend</code> 包装本地命令，<code>verify</code> 调用质量门禁。门禁包括 Ruff、pytest、启动/停止和资产/模板 shell 语法、ESLint、TS/Vite 与 i18n parity；它不直接证明本 HTML 的布局或源码陈述正确。</li>
+            <li><strong>cluster_assets：</strong>guardian 脚本被装入 ConfigMap 并由集群 CronJob 执行；LBC 的固定 IAM policy JSON 是组件安装输入，不是后台同步服务。</li>
+            <li><strong>trainer_image：</strong>Trainer 使用 amd64 / CUDA 镜像，按 fsdp 或 megatron profile 用 toolkit 的 lockfile 执行 <code>uv sync --frozen</code>；buildspec 负责构建并 push ECR。与 Agent 的 arm64 镜像是两条构建链。</li>
+            <li><strong>templates 与 sibling：</strong><code>template.yaml</code> 保存参数、payload 要求、loop 和 preset，Agent overlay 会覆盖选出的 toolkit 示例文件，并加入本地构建的 toolkit wheel。后端 uv 路径相对 <code>backend/</code> 是 <code>../../agentcore-rl-toolkit</code>，也就是仓库旁的 <code>../agentcore-rl-toolkit</code>；只检查接入声明，未读取该仓库内部。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../Makefile" data-line-start="1" data-line-end="20" data-symbol="install / dev / verify">Makefile:1–20 · install / dev / verify 等 targets</a>
+            <a class="source-ref" href="../scripts/verify.sh" data-line-start="12" data-line-end="34" data-symbol="quality gate sections">scripts/verify.sh:12–34 · 分节检查与最终退出码</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="577" data-line-end="619" data-symbol="install_guardian">backend/app/services/components.py:577–619 · install_guardian</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="228" data-line-end="238" data-symbol="lbc_iam_policy.json">backend/app/services/components.py:228–238 · LBC policy 资产读取</a>
+            <a class="source-ref" href="../trainer_image/Dockerfile" data-line-start="1" data-line-end="45" data-symbol="PROFILE / frozen toolkit dependencies">trainer_image/Dockerfile:1–45 · PROFILE / frozen toolkit 依赖</a>
+            <a class="source-ref" href="../trainer_image/buildspec.yml" data-line-start="1" data-line-end="19" data-symbol="build / post_build">trainer_image/buildspec.yml:1–19 · build / post_build</a>
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="58" data-line-end="125" data-symbol="toolkit_wheel / prepare_context">backend/app/services/agents.py:58–125 · toolkit_wheel / prepare_context</a>
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="250" data-line-end="258" data-symbol="docker_build">backend/app/services/agents.py:250–258 · docker_build 的 arm64 目标</a>
+            <a class="source-ref" href="../templates/gsm8k_math/template.yaml" data-line-start="1" data-line-end="44" data-symbol="params / payload / agent_loop / presets">templates/gsm8k_math/template.yaml:1–44 · params / payload / agent_loop / presets</a>
+            <a class="source-ref" href="../backend/pyproject.toml" data-line-start="32" data-line-end="35" data-symbol="tool.uv.sources">backend/pyproject.toml:32–35 · tool.uv.sources</a>
+          </div>
+          <aside class="boundary"><p><strong>资产边界：</strong>源码声明了远程 CloudFormation 模板与镜像/包来源，不等于本页审计了其内容或供应链。这里解释的是 TuningPad 如何组装和引用它们，没有执行安装、构建或部署。</p><a class="source-ref" href="../backend/app/services/hyperpod.py" data-line-start="31" data-line-end="35" data-symbol="template_url">backend/app/services/hyperpod.py:31–35 · template_url</a></aside>
+        </section>
+        <section id="data-model" aria-labelledby="data-model-title">
+          <h2 id="data-model-title"><span class="section-no">03</span> 数据模型与台账</h2>
+          <p class="lead"><strong>对象关系保存在 <code>backend/app/models.py</code>，运行中的云资源仍要重新查询。</strong>“台账”记录系统曾提交的意图、外部标识和观测进度；一条 <code>ready</code> 记录不是对云资源仍存在的持续证明。</p>
+          <div class="table-wrap"><table>
+            <caption>模型关联地图：箭头表示外键引用；特别注明的 JSON / target_id 不是外键</caption>
+            <thead><tr><th scope="col">实体 / 关联</th><th scope="col">保存什么、为何独立存在</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Project / Cluster</th><td><code>Project.regions</code> 存区域公共资源；服务使用 ID 为 <code>default</code> 的单例。Cluster 存 create/import 来源、区域、EKS/HyperPod/stack 标识、network、components、params 与 idle_policy；不是 Project 的外键子表。<a class="source-ref" href="../backend/app/models.py" data-line-start="24" data-line-end="53" data-symbol="Project / Cluster">backend/app/models.py:24–53 · Project / Cluster</a><a class="source-ref" href="../backend/app/services/project.py" data-line-start="20" data-line-end="41" data-symbol="PROJECT_ID / get_project">backend/app/services/project.py:20–41 · PROJECT_ID / get_project</a></td></tr>
+              <tr><th scope="row">AgentRuntime → Agent<br>AgentRuntime → Cluster（可空）</th><td>Agent 记录模板/上传/镜像来源、配置、镜像 URI 和检查结果；Runtime 记录真正部署的区域、网络、runtime 标识、镜像与 smoke 结果。独立 PUBLIC smoke runtime 可不关联集群；<code>obs</code> 是 eval 专用 twin 信息的 JSON 列，不是另一个 Runtime 行。<a class="source-ref" href="../backend/app/models.py" data-line-start="56" data-line-end="88" data-symbol="Agent / AgentRuntime">backend/app/models.py:56–88 · Agent / AgentRuntime</a></td></tr>
+              <tr><th scope="row">Dataset / TrainerImage</th><td>Dataset 记录来源、区域、split 的 S3 路径/行数、payload/prompt 元数据与样本；TrainerImage 记录 region、profile、toolkit_sha、build_id 与镜像 URI。二者是准备资源，不等于训练 Run。<a class="source-ref" href="../backend/app/models.py" data-line-start="91" data-line-end="115" data-symbol="TrainerImage / Dataset">backend/app/models.py:91–115 · TrainerImage / Dataset</a></td></tr>
+              <tr><th scope="row">Run → Runtime / Cluster / Dataset</th><td>必需训练集、可选验证集；<code>model_id</code> 是模型标识字符串，非模型表外键。<code>spec</code> 保存计划与参数，<code>compute</code> 保存资源/预算策略，<code>progress</code> 保存 step、cursor、attempt 等。另有 rayjob_name、retries、起止时间、node_hours、估算费用与 error。<a class="source-ref" href="../backend/app/models.py" data-line-start="118" data-line-end="139" data-symbol="Run">backend/app/models.py:118–139 · Run</a></td></tr>
+              <tr><th scope="row">RunMetric → Run<br>Export → Run</th><td>Metric 按 step / key 记录数值；Export 记录选中的 checkpoint step、合并产物的 FSx/S3 位置与 Kubernetes Job。训练指标、训练本体与显式导出是不同实体。<a class="source-ref" href="../backend/app/models.py" data-line-start="142" data-line-end="161" data-symbol="RunMetric / Export">backend/app/models.py:142–161 · RunMetric / Export</a></td></tr>
+              <tr><th scope="row">InferenceEndpoint → Cluster<br>Eval → Endpoint / Runtime / Dataset</th><td>Endpoint 的模型来源是 <code>model_source</code> JSON（HF 或 export），<strong>不是 Export 外键</strong>；Eval 存 split、样本 limit、summary、结果 S3 地址及可选 trace 标识。模型部署和评测不是 Run 成功后的隐式必经步骤。<a class="source-ref" href="../backend/app/models.py" data-line-start="164" data-line-end="200" data-symbol="InferenceEndpoint / Eval">backend/app/models.py:164–200 · InferenceEndpoint / Eval</a></td></tr>
+              <tr><th scope="row">Job ⇢ 业务目标（逻辑关联）</th><td><code>type</code> 选 pipeline；<code>target_id</code> 是普通字符串，非外键。payload 是输入；context 是供后续 stage / 恢复使用的输出；stages 是带时间与 detail 的 JSON 数组。一个目标可以有多个 Job，不能据 Run ID 推断唯一 Job。<a class="source-ref" href="../backend/app/models.py" data-line-start="203" data-line-end="218" data-symbol="Job">backend/app/models.py:203–218 · Job</a><a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="408" data-line-end="413" data-symbol="latest_job">backend/app/jobs/engine.py:408–413 · latest_job 按时间选择</a></td></tr>
+            </tbody>
+          </table></div>
+          <h3>3.1 约束是真的，租户隔离不是</h3>
+          <p>关联通过显式 <code>ForeignKey</code> 列表达，没有 ORM <code>relationship()</code> 导航；只有部分 FK 配置 cascade，删除不会自动替你清完所有依赖。Runtime 声明 <code>(agent_id, cluster_id)</code> 唯一约束，Metric 声明 <code>(run_id, step, key)</code> 唯一约束。多数资源带 TimestampMixin，但 <code>RunMetric</code> 不继承它；<code>workspace_id</code> 是预留字段，不能作为已实现多租户鉴权的依据。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/core/db.py" data-line-start="27" data-line-end="37" data-symbol="Base / TimestampMixin">backend/app/core/db.py:27–37 · Base / TimestampMixin</a>
+            <a class="source-ref" href="../backend/app/models.py" data-line-start="69" data-line-end="75" data-symbol="AgentRuntime.__table_args__">backend/app/models.py:69–75 · AgentRuntime 唯一约束与 FK</a>
+            <a class="source-ref" href="../backend/app/models.py" data-line-start="142" data-line-end="149" data-symbol="RunMetric">backend/app/models.py:142–149 · RunMetric</a>
+          </div>
+          <h3>3.2 持久化边界决定恢复边界</h3>
+          <ul>
+            <li><strong>短 session：</strong>SQLite 启用 WAL 和外键；每个 <code>session_scope()</code> 成功 commit、异常 rollback、最终 close。线程池可以各开 session，这不表示共享一个 Session 是安全的。</li>
+            <li><strong>JSON 重新赋值：</strong>没有 MutableDict / MutableList 自动追踪。<code>ctx.set()</code> 合并并重新赋值 <code>Job.context</code>；<code>_update_stage()</code> 复制 stages 再提交。只改 <code>ctx.context</code> 内存字典，不代表输出已持久化。</li>
+            <li><strong>启动补列有限：</strong><code>create_all()</code> 之后的 <code>_add_missing_columns()</code> 只为已存在表追加缺失、可空、非主键列，不回填值、不补外键/索引/唯一约束，不是通用迁移系统。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/core/db.py" data-line-start="44" data-line-end="109" data-symbol="_make_engine / init_db / _add_missing_columns / session_scope">backend/app/core/db.py:44–109 · _make_engine / init_db / _add_missing_columns / session_scope</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="123" data-line-end="133" data-symbol="StageContext.set / detail">backend/app/jobs/engine.py:123–133 · StageContext.set / detail</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="285" data-line-end="294" data-symbol="_update_stage">backend/app/jobs/engine.py:285–294 · _update_stage</a>
+          </div>
+          <aside class="warning"><p><strong>没有跨系统事务：</strong>create Run 提交与创建 Job 是两次 DB 提交；云创建与写回外部 ID 也不是同一个原子事务。重启会跳过已经 succeeded 的 stage，不会全量重验它当初创建的云资源。因此“台账成功”“现在可用”“之后可恢复”是三个不同判断。</p><a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="173" data-line-end="196" data-symbol="create">backend/app/routers/runs.py:173–196 · create 的 Run commit / Job start 边界</a><br><a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="324" data-line-end="350" data-symbol="_run">backend/app/jobs/engine.py:324–350 · _run 跳过成功 stage</a></aside>
+        </section>
+        <section id="job-engine" aria-labelledby="job-engine-title">
+          <h2 id="job-engine-title"><span class="section-no">04</span> Job 引擎与状态</h2>
+          <p class="lead"><strong>Job 是一次 pipeline 执行，stage 是其中一步，Run 是一次训练业务。</strong>例如 <code>run.train</code> Job 指向某个 Run；Run 的 <code>image</code> 阶段还可能等待另一个 <code>trainer.build</code> Job。它们共享台账，却不共享同一条状态机。</p>
+          <h3>4.1 从注册到结束：引擎只负责执行骨架</h3>
+          <ol>
+            <li><code>register(type, stages, on_finish)</code> 保存有序阶段与可选 finish hook，拒绝同一 pipeline 内重复的 stage 名。stage 名是持久化进度的定位键，而非纯显示文案。</li>
+            <li><code>start()</code> 先提交 <code>queued</code> Job、payload 和全部 <code>pending</code> stages，再放进 <code>ThreadPoolExecutor</code>。默认工作线程数来自 <code>max_concurrent_jobs</code>（默认 12）；长时间 monitor 也占一个 worker。</li>
+            <li><code>_run()</code> 加载 context 与 succeeded 阶段集合，设置 Job 为 running，然后按注册顺序执行尚未成功的阶段。阶段成功/失败/取消分别写回 stage 状态与时间。</li>
+            <li><code>_finish()</code> 先调用业务 hook，再提交 Job 终态并清取消标记。AppError 的稳定 code / message 持久化到 Job，非预期异常将 traceback 写到 Job 文本日志。</li>
+          </ol>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="42" data-line-end="69" data-symbol="Stage / register / pipeline">backend/app/jobs/engine.py:42–69 · Stage / register / pipeline</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="168" data-line-end="217" data-symbol="JobEngine.start">backend/app/jobs/engine.py:168–217 · JobEngine.start</a>
+            <a class="source-ref" href="../backend/app/core/config.py" data-line-start="64" data-line-end="66" data-symbol="max_concurrent_jobs">backend/app/core/config.py:64–66 · max_concurrent_jobs</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="296" data-line-end="375" data-symbol="_finish / _run">backend/app/jobs/engine.py:296–375 · _finish / _run</a>
+          </div>
+          <aside class="warning"><p><strong>hook 的先后顺序不是事务保证。</strong>引擎会捕获并记录 finish hook 异常，随后仍提交 Job 终态。因此“看到 Job 结束就必然看到目标资源已同步完成”不成立。引擎也没有分布式领取、租约或跨进程去重，不能承诺 exactly-once（严格只执行一次）。</p></aside>
+          <h3>4.2 三条状态轨道，外加云端 RayJob</h3>
+          <div class="table-wrap"><table>
+            <caption>状态词属于各自对象；方括号表示条件分支，并非固定必经步骤</caption>
+            <thead><tr><th scope="col">对象与常见路径</th><th scope="col">异常、取消与容易误读的分支</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Job<div class="flow"><code>queued → running → succeeded</code></div></th><td>终态还有 <code>failed / cancelled</code>。排队时可直接 <code>queued → cancelled</code>；retry 重新 queued，仍用原 ID。<a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="219" data-line-end="245" data-symbol="retry / cancel">backend/app/jobs/engine.py:219–245 · retry / cancel</a></td></tr>
+              <tr><th scope="row">stage<div class="flow"><code>pending → running → succeeded</code></div></th><td>函数内失败 / 协作取消写 <code>failed / cancelled</code>；若在两个阶段之间检查到取消，下一步仍可能是 pending。恢复只跳过 succeeded，不从中断的 Python 指令继续。<a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="333" data-line-end="367" data-symbol="_run">backend/app/jobs/engine.py:333–367 · _run 阶段状态</a></td></tr>
+              <tr><th scope="row">Run<div class="flow"><code>queued → preparing → [waiting_capacity] → running → succeeded</code></div></th><td>自动重试会 <code>running → retrying → running</code>；失败是 failed，正常取消映射为 <strong>stopped</strong>，不是 cancelled。capacity 正常进入容量检查时，两种 provider 都会写 waiting_capacity，即使随后的首次探测已满足；此前失败、或恢复时跳过已成功阶段的路径不一定重新经过它。manual resume 再置 queued。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="93" data-line-end="109" data-symbol="stage_preflight">backend/app/pipelines/run.py:93–109 · stage_preflight</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="144" data-line-end="260" data-symbol="_capacity_ec2 / stage_capacity">backend/app/pipelines/run.py:144–260 · _capacity_ec2 / stage_capacity</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="457" data-symbol="stage_monitor">backend/app/pipelines/run.py:392–457 · stage_monitor</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="521" data-line-end="542" data-symbol="_finished">backend/app/pipelines/run.py:521–542 · _finished 状态映射</a></td></tr>
+              <tr><th scope="row">外部 RayJob<div class="flow"><code>jobStatus</code> / <code>jobDeploymentStatus</code></div></th><td>monitor 识别 <code>SUCCEEDED</code>，或 deployment 为 <code>Complete</code> 且 job 不为 FAILED；<code>FAILED / STOPPED</code>、deployment Failed 或已命名对象消失进入失败/重试判断。这些云端状态词不能替换 Job / Run 的小写状态。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="417" data-line-end="448" data-symbol="stage_monitor">backend/app/pipelines/run.py:417–448 · stage_monitor 的外部状态映射</a></td></tr>
+            </tbody>
+          </table></div>
+          <p><strong>“训练成功”可能早于“编排完成”。</strong>monitor 可先写 Run succeeded，此时 Job 还在执行 finalize；finalize 若失败，finish hook 又可能把 Run 改成 failed。所以前端同时查询 Run 和 Job 是有意义的，并非重复显示同一个状态。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="460" data-line-end="472" data-symbol="stage_finalize">backend/app/pipelines/run.py:460–472 · stage_finalize</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="521" data-line-end="528" data-symbol="_finished">backend/app/pipelines/run.py:521–528 · _finished</a>
+          </div>
+          <h3>4.3 四种“继续”并不等价</h3>
+          <div class="table-wrap"><table>
+            <caption>恢复时先确认对象身份，再看重跑范围</caption>
+            <thead><tr><th scope="col">机制</th><th scope="col">复用什么 / 实际做什么</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">启动恢复<br><code>resume_pending</code></th><td>取台账中的 queued / running Job，仍用原 ID、context、成功 stages；从第一个未成功阶段的函数入口重新执行，不恢复进程栈。依赖 stage 先查真实状态再行动的幂等约定。<a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="247" data-line-end="254" data-symbol="resume_pending">backend/app/jobs/engine.py:247–254 · resume_pending</a></td></tr>
+              <tr><th scope="row">Job retry</th><td>原 Job 改 queued，清 error / error_code / ended_at，保留原 context 与成功阶段。后端只拒绝 active Job，因此 succeeded 也能被调用 retry；并不是复制一个全新 Job 或全量重跑。<a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="219" data-line-end="231" data-symbol="retry">backend/app/jobs/engine.py:219–231 · retry</a></td></tr>
+              <tr><th scope="row">monitor 自动 attempt 重试</th><td>同 Run、同 Job、同 monitor stage 内删除旧 RayJob，增加 retries / attempt 再提交。默认上限两次；rollout failure guard 等分支不重试。attempt 是外部训练提交轮次，不是 Job retry 次数。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="448" data-symbol="stage_monitor">backend/app/pipelines/run.py:392–448 · stage_monitor</a></td></tr>
+              <tr><th scope="row">Run resume</th><td>保留 Run ID 与 checkpoint 路径，清业务 error / ended_at、重置 retries，<strong>新建 run.train Job</strong>，payload 带 resume。重新经过准备；已有 rayjob_name 时递增 attempt。API 无新的费用确认参数；verl 按 <code>resume_mode=auto</code> 尝试从原目录恢复，不保证任意失败都能续训。<a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="293" data-line-end="301" data-symbol="resume">backend/app/routers/runs.py:293–301 · resume</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="291" data-line-end="297" data-symbol="stage_submit">backend/app/pipelines/run.py:291–297 · stage_submit</a><a class="source-ref" href="../backend/app/render/train.py" data-line-start="49" data-line-end="55" data-symbol="FIXED">backend/app/render/train.py:49–55 · FIXED / resume_mode</a></td></tr>
+            </tbody>
+          </table></div>
+          <h3>4.4 取消是协作式信号，不是强制终止云操作</h3>
+          <p>取消标记存在引擎内存集合中，在阶段边界、<code>check_cancel()</code>、<code>sleep()</code>、<code>wait_until()</code> 检查。正在阻塞的 SDK / 子进程调用不会因标记立即被中断；进程重启也不保留这份内存信号。正常运行路径通过 <code>_finish</code> 将 Job cancelled 映射为 Run stopped，清理还取决于所在阶段和业务 hook。</p>
+          <aside class="warning"><p><strong>静态风险，未复现：</strong>queued 取消直接写 Job cancelled，不走 finish hook；worker 随后见终态直接返回。因此目标业务状态可能未同步，内存取消标记也可能残留；在同一进程内 retry 原 Job 时可能再遇取消。这里是源码分支推导，不是已执行的竞态测试，也不是已修复承诺。</p></aside>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="135" data-line-end="165" data-symbol="check_cancel / sleep / wait_until">backend/app/jobs/engine.py:135–165 · check_cancel / sleep / wait_until</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="233" data-line-end="245" data-symbol="cancel">backend/app/jobs/engine.py:233–245 · cancel</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="320" data-line-end="339" data-symbol="_finish / _run">backend/app/jobs/engine.py:320–339 · 清标记与终态早退</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="450" data-line-end="457" data-symbol="stage_monitor">backend/app/pipelines/run.py:450–457 · monitor 取消时删除 RayJob</a>
+          </div>
+          <h3>4.5 观测通道与未启用的 reconciler</h3>
+          <p><code>ctx.detail()</code> 写阶段摘要，<code>ctx.log()</code> 追加本地 Job 日志。日志 API 的 cursor 是<strong>字节偏移</strong>，默认一页 256 KiB，不能拿解码后字符串长度作下一次 offset；缺文件返回空页。这是编排日志，不是 S3 中的训练日志。</p>
+          <p><strong>reconciler 当前只是框架。</strong>本快照在 <code>backend/app</code> 的 Python 源码中检索 <code>add_reconciler</code>，只有定义、没有注册调用；列表为空时 <code>start_reconcilers()</code> 直接返回。活跃训练的观察由 monitor stage 承担，guardian 在集群内独立执行；不能把引擎注释里的“periodic status sync”画成已启用的全资源自动同步系统。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="32" data-line-end="99" data-symbol="LOG_READ_LIMIT / append_log / read_log">backend/app/jobs/engine.py:32–99 · LOG_READ_LIMIT / log_path / append_log / read_log</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="120" data-line-end="133" data-symbol="StageContext.log / detail">backend/app/jobs/engine.py:120–133 · StageContext.log / detail</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="261" data-line-end="282" data-symbol="add_reconciler / start_reconcilers">backend/app/jobs/engine.py:261–282 · add_reconciler / start_reconcilers</a>
+          </div>
+        </section>
+        <section id="preparation" aria-labelledby="preparation-title">
+          <h2 id="preparation-title"><span class="section-no">05</span> 训练前的准备分支</h2>
+          <p class="lead">准备工作是一组可以复用、分别提交的业务分支，<strong>不是每个请求都从 setup 串行跑到训练</strong>。Run 引用区域资源、集群与 VPC Runtime、Dataset，并在自己的 image stage 中复用或按需准备 TrainerImage。</p>
+          <div class="table-wrap"><table>
+            <caption>准备流程矩阵：名称与顺序来自当前 pipeline 注册代码</caption>
+            <thead><tr><th scope="col">Job type 与真实 stage</th><th scope="col">产物 / 分支</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>setup.region</code><p><code>identity → bucket → roles → ecr</code></p></th><td>读取 STS 身份，准备区域 S3 bucket、AgentCore / CodeBuild roles、Agent / Trainer ECR repos，结果记入 Project.regions。<a class="source-ref" href="../backend/app/pipelines/setup.py" data-line-start="14" data-line-end="65" data-symbol="stage_identity / register">backend/app/pipelines/setup.py:14–65 · stage_identity 至 register</a></td></tr>
+              <tr><th scope="row"><code>cluster.create</code><p><code>validate → stack → discover → component.*</code></p></th><td>新建官方 HyperPod EKS stack，等待并发现集群/网络，再安装组件。stack 已存在时检查状态而非无条件再创建。<a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="81" data-line-end="171" data-symbol="stage_validate / stage_stack / stage_discover">backend/app/pipelines/cluster.py:81–171 · stage_validate / stage_stack / stage_discover</a><a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="348" data-line-end="357" data-symbol="register cluster.create">backend/app/pipelines/cluster.py:348–357 · cluster.create 注册</a></td></tr>
+              <tr><th scope="row"><code>cluster.import</code><p><code>discover → component.*</code></p><code>cluster.components</code><p><code>component.*</code></p></th><td>导入跳过创建 stack，但仍发现并安装平台组件；components 用于修复 / 重装组件。因此 import 不是只读登记。<a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="358" data-line-end="361" data-symbol="register cluster.import / cluster.components">backend/app/pipelines/cluster.py:358–361 · cluster.import / cluster.components 注册</a></td></tr>
+              <tr><th scope="row"><code>agent.build</code><p><code>context → checks → build → probe → push</code></p><code>agent.import</code><p><code>inspect</code></p></th><td>模板或上传代码走本地 arm64 构建与健康探测，再推 ECR；已有镜像走检查，不假装重新执行构建或源码检查。<a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="73" data-line-end="141" data-symbol="agent.build / agent.import">backend/app/pipelines/agent.py:73–141 · build stages / import 注册</a></td></tr>
+              <tr><th scope="row"><code>agent.deploy</code><p><code>deploy → smoke</code></p></th><td>创建 / 更新 AgentCore Runtime，再进行 smoke；PUBLIC 测试部署与集群 VPC 部署分开。支持 skip_smoke，所以 ready 不严格等同于通过 smoke。<a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="173" data-line-end="186" data-symbol="runtime_network">backend/app/pipelines/agent.py:173–186 · runtime_network</a><a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="361" data-line-end="392" data-symbol="stage_smoke / register">backend/app/pipelines/agent.py:361–392 · stage_smoke / _deployed / register</a></td></tr>
+              <tr><th scope="row"><code>dataset.ingest</code><p><code>ingest</code></p><code>dataset.builtin</code><p><code>generate</code></p></th><td>上传数据规范化 / 校验 / 拆分，或生成内置数据，将各 split 写成 parquet 上传 S3，台账保存路径与行数。<a class="source-ref" href="../backend/app/pipelines/dataset.py" data-line-start="38" data-line-end="105" data-symbol="stage_ingest / stage_builtin / register">backend/app/pipelines/dataset.py:38–105 · _write / stage_ingest / stage_builtin / register</a></td></tr>
+              <tr><th scope="row"><code>trainer.build</code><p><code>source → build</code></p></th><td>上传构建上下文、准备 CodeBuild 项目，提交或复用 build_id 后轮询构建。与 Agent 镜像流程独立，Run.image 可等待它。<a class="source-ref" href="../backend/app/pipelines/trainer.py" data-line-start="74" data-line-end="114" data-symbol="stage_source / stage_build / register">backend/app/pipelines/trainer.py:74–114 · stage_source / stage_build / register</a></td></tr>
+            </tbody>
+          </table></div>
+          <h3>5.1 区域 setup 与集群组件不是 GPU 预留</h3>
+          <p>区域 preflight 检查身份、权限模拟、配额、本地工具与 toolkit 路径；部分查询失败或缺工具只返回 warning。preflight 是独立 API，setup_region 并不以 last_preflight.ok 作门禁；下游调用的 <code>require_region()</code> 检查的是区域台账 status=ready。预检通过也不是容量、镜像构建或云权限实际可用性的完整证明。</p>
+          <p>新 stack 的初始 instance group 只有一个 system 节点，GPU 容量由后续池操作 / Run capacity 阶段取得。组件按下面的<strong>精确顺序</strong>运行，每项 stage 名均带 <code>component.</code> 前缀：</p>
+          <p class="flow"><code>access → reach → namespace → irsa → node_ecr → security_groups → kuberay → gpu_plugins → lbc → fsx → guardian</code></p>
+          <p>前半段建立访问、命名空间、服务账号 IAM 身份（IRSA）、拉镜像权限及安全组；后半段安装 Ray / GPU / 负载均衡组件、FSx PVC 与独立 guardian。组件函数记录 installing / ready / failed；已有 HyperPod 标识的失败集群可标 degraded，而不是把所有失败视为“集群从未创建”。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/services/project.py" data-line-start="127" data-line-end="217" data-symbol="preflight">backend/app/services/project.py:127–217 · preflight</a>
+            <a class="source-ref" href="../backend/app/routers/setup.py" data-line-start="32" data-line-end="42" data-symbol="run_preflight / setup_region">backend/app/routers/setup.py:32–42 · run_preflight / setup_region</a>
+            <a class="source-ref" href="../backend/app/services/project.py" data-line-start="57" data-line-end="65" data-symbol="require_region">backend/app/services/project.py:57–65 · require_region</a>
+            <a class="source-ref" href="../backend/app/services/hyperpod.py" data-line-start="65" data-line-end="95" data-symbol="cfn_parameters">backend/app/services/hyperpod.py:65–95 · cfn_parameters 初始 system group</a>
+            <a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="184" data-line-end="261" data-symbol="_component / _c_access / _c_guardian">backend/app/pipelines/cluster.py:184–261 · _component 与组件函数</a>
+            <a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="326" data-line-end="345" data-symbol="COMPONENT_STAGES / _on_ready">backend/app/pipelines/cluster.py:326–345 · COMPONENT_STAGES / _on_ready</a>
+          </div>
+          <h3>5.2 Agent：检查、部署与 smoke 的证明力度不同</h3>
+          <p><code>static_checks()</code> 是启发式检查：查 Dockerfile、<code>AgentCoreRLApp</code>、<code>rollout_entrypoint</code> 等字符串，并警告未转发 <code>_rollout.api_key</code>；AST 辅助检查模块级随机值/时间调用，提示 V2 snapshot 风险。这不是 Agent 语义、奖励正确性或全部运行时路径的证明。</p>
+          <p>本地 probe 只要求镜像的 <code>/ping</code> 返回 200；导入镜像主要检查 ECR 可读、arm64 架构和大小。部署中的 VPC 网络来自集群 private_subnets 与 sg_acr。默认 smoke 的模型后端是 Bedrock OpenAI 接口：样本成功且奖励是数值才算通过，<strong>并未验证 GPU gateway 链路，也未验证奖励有学习价值</strong>。</p>
+          <aside class="warning"><p><strong>ready 不等于训练端到端验收：</strong>请求可设置 <code>skip_smoke</code>，随后成功 hook 仍将 Runtime 标为 ready。Run preflight 检查 runtime status / ARN，不检查 last_smoke 证明；不能根据错误文案中的“pass the smoke test first”反推实际硬门禁。</p></aside>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="128" data-line-end="210" data-symbol="static_checks / snapshot_unsafe_calls">backend/app/services/agents.py:128–210 · static_checks / snapshot_unsafe_calls</a>
+            <a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="189" data-line-end="305" data-symbol="deploy_and_wait / stage_deploy">backend/app/pipelines/agent.py:189–305 · deploy_and_wait / stage_deploy</a>
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="287" data-line-end="324" data-symbol="local_probe">backend/app/services/agents.py:287–324 · local_probe</a>
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="339" data-line-end="385" data-symbol="inspect_image">backend/app/services/agents.py:339–385 · inspect_image</a>
+            <a class="source-ref" href="../backend/app/services/agents.py" data-line-start="565" data-line-end="620" data-symbol="bedrock_openai / smoke">backend/app/services/agents.py:565–620 · bedrock_openai / smoke</a>
+            <a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="361" data-line-end="385" data-symbol="stage_smoke / _deployed">backend/app/pipelines/agent.py:361–385 · stage_smoke / _deployed</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="93" data-line-end="109" data-symbol="stage_preflight">backend/app/pipelines/run.py:93–109 · stage_preflight 实际检查</a>
+          </div>
+          <h3>5.3 Dataset：规范化数据，不替代评测设计</h3>
+          <p>上传支持 JSONL / JSON / CSV / parquet，统一成带 <code>payload</code> 的行，可保留显式 chat <code>prompt</code>。校验要求 payload 是对象、满足模板字段和 prompt 约束，并拒绝用户 payload 内的保留键 <code>_rollout / _config</code>。缺 val 时可按 val_fraction 确定性拆分；parquet 保存到本地并上传 S3，Run 使用这些 split 路径。</p>
+          <p>内置 GSM8K 的 val 是完整 test 的<strong>前 200 条</strong>，仍与 test 重叠，不能宣称独立留出集。OfficeBench 通过 toolkit preprocess 接入上传任务/testbed，按任务目录与应用数量类别分层划分；这里只核对本仓库的调用与划分逻辑，未审计外部数据或工具实现。模板 preset 的 verified 标记是仓库历史声明，不作为本次训练或性能验收。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/services/datasets.py" data-line-start="47" data-line-end="164" data-symbol="read_rows / validate_rows / split_rows / write_split">backend/app/services/datasets.py:47–164 · read_rows / validate_rows / split_rows / write_split</a>
+            <a class="source-ref" href="../backend/app/pipelines/dataset.py" data-line-start="77" data-line-end="96" data-symbol="stage_builtin">backend/app/pipelines/dataset.py:77–96 · stage_builtin 的 GSM8K / OfficeBench splits</a>
+            <a class="source-ref" href="../backend/app/services/datasets.py" data-line-start="216" data-line-end="280" data-symbol="officebench_rows">backend/app/services/datasets.py:216–280 · officebench_rows</a>
+            <a class="source-ref" href="../templates/gsm8k_math/template.yaml" data-line-start="1" data-line-end="9" data-symbol="verified / toolkit_dir">templates/gsm8k_math/template.yaml:1–9 · verified / toolkit_dir</a>
+          </div>
+          <h3>5.4 TrainerImage：Run 内等待，构建是独立 Job</h3>
+          <p><code>find_or_create()</code> 按 region / profile / toolkit revision 查最近台账。ready / building / queued 记录可复用；没有可复用记录时再查 ECR tag，必要时创建 TrainerImage 并启动 <code>trainer.build</code>。build 阶段把 build_id 持久化到 context，以便恢复时继续观察既有构建。</p>
+          <p>Run.image 保存 trainer_image_id，等待镜像 ready 后把 URI 写入自己的 context。镜像 ready 只代表该准备阶段的结果，不能代替 GPU、EFA、多节点通信或模型训练验收。下一章继续阅读 <a href="#planning">规划与参数</a>、<a href="#training-flow">Run 六阶段主线</a>；这只是阅读顺序，实际规划发生在创建 Run 前，镜像检查在 Run 的 image stage 内。并非所有训练都要重新构建镜像。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/pipelines/trainer.py" data-line-start="37" data-line-end="105" data-symbol="find_or_create / stage_build">backend/app/pipelines/trainer.py:37–105 · find_or_create / stage_source / stage_build</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="113" data-line-end="137" data-symbol="stage_image">backend/app/pipelines/run.py:113–137 · stage_image</a>
+          </div>
+        </section>
+        <section id="planning" aria-labelledby="planning-title">
+          <h2 id="planning-title"><span class="section-no">06</span> 训练规划与参数</h2>
+          <p class="lead">规划器回答“按当前输入建议怎样训练”，不是“这些 GPU 一定足够”。先区分算法与执行后端，再沿着<strong>继承值 → 显式覆盖 → 后端验证 → 渲染</strong>看参数如何落到训练进程。</p>
+          <h3>6.1 四个维度，不是一组互斥按钮</h3>
+          <div class="table-wrap"><table>
+            <caption>planner 的选择轴及本仓库的启发式规则</caption>
+            <thead><tr><th scope="col">维度</th><th scope="col">含义与选择逻辑</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">FSDP / Megatron<br>执行后端 profile</th><td>FSDP（Fully Sharded Data Parallel）把训练状态分片；Megatron 路径提供模型并行配置。显式 prefer 优先；auto 遇 MoE（混合专家）、参数量 ≥20B 或上下文 ≥65536 时选择 Megatron，否则选 FSDP。不是在二者之间选择不同 RL 算法。</td></tr>
+              <tr><th scope="row">full / LoRA<br>可训练参数范围</th><td>full 更新全模型；LoRA 冻结基座、训练低秩适配器。显式 tuning 优先；auto 在全量状态不“舒适”或 profile 为 Megatron 时选 LoRA。全量粗估为 <code>16 × 参数量 / world_size</code> 字节/GPU，≤半数 HBM 算舒适；LoRA 粗估为 <code>2 × 参数量 / min(world_size, 8)</code>。这不包含完整激活、通信和共置推理显存模型。</td></tr>
+              <tr><th scope="row">TP / CP / EP<br>训练侧并行</th><td>TP 切分张量计算，CP 切分上下文，EP 分布 MoE 专家。FSDP 建议值均为 1。Megatron 按权重占单卡显存约 30% 的目标选择 2 的幂 TP；≥20B 时至少 <code>min(4, 单节点 GPU 数)</code>。长上下文且 <code>gpus // TP ≥ 2</code> 时 CP=2；MoE 的 EP 为 <code>max(1, min(gpus // TP, 8))</code>。</td></tr>
+              <tr><th scope="row">rollout_tp / offload<br>推理与内存旋钮</th><td>rollout TP 按约 35% HBM 的权重需求单独估算，Megatron 时不小于训练 TP；它不等于训练 TP。planner 另给学习率、参数/梯度/优化器 offload 与 vLLM 显存比例；LoRA 默认 FSDP rank32/alpha64，Megatron rank64/alpha128。原因与 warnings 随 plan 返回。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/planner.py" data-line-start="63" data-line-end="183" data-symbol="plan">backend/app/planner.py:63–183 · plan（阈值、状态估算、并行与默认旋钮）</a>
+          </div>
+          <aside class="warning"><p><strong>建议不是硬校验：</strong><code>plan()</code> 是无 I/O 的纯函数，显存不足常以 warning 表达；不做实机显存测试、完整并行整除检查或训练效果预测。API 的 <code>plan_overrides</code> 只限制可覆盖字段名（拒绝 warnings / reasons / world_size），没有完整类型、拓扑或相互一致性验证。不能把“preview 返回了 plan”写成容量/训练可行性保证。</p></aside>
+          <p>硬门禁分散在不同边界：请求模型约束 nodes 和预算字段；训练实例目录只接受训练用 P 系列；模型检查用 chat-template SHA256 匹配 toolkit schema registry；Run.preflight 才硬拒绝不支持多节点 EFA 的实例。模型模板匹配说明接入兼容路径，不等于 GPU、多节点通信或该模型配方已验收。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="28" data-line-end="61" data-symbol="Compute / CreateRun">backend/app/routers/runs.py:28–61 · Compute / CreateRun</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="100" data-line-end="119" data-symbol="_validate">backend/app/routers/runs.py:100–119 · _validate / plan_overrides</a>
+            <a class="source-ref" href="../backend/app/catalog/instances.py" data-line-start="105" data-line-end="117" data-symbol="spec">backend/app/catalog/instances.py:105–117 · spec 的训练实例约束</a>
+            <a class="source-ref" href="../backend/app/catalog/models.py" data-line-start="89" data-line-end="155" data-symbol="schema_for_template / check_model">backend/app/catalog/models.py:89–155 · schema_for_template / check_model 兼容判断</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="93" data-line-end="109" data-symbol="stage_preflight">backend/app/pipelines/run.py:93–109 · stage_preflight</a>
+          </div>
+          <h3>6.2 参数的四层来源：显示继承不等于提交覆盖</h3>
+          <ol>
+            <li><strong>后端基础默认：</strong><code>GET /api/runs/defaults</code> 返回 <code>DEFAULT_PARAMS</code> 与 <code>AGENT_LOOP_DEFAULTS</code>。例如 train_batch_size=32、rollout_n=8、total_epochs=1、save_freq/test_freq=10、保留最近 3 个 actor checkpoint。学习率、vLLM 显存比例、总步数与部分 loop 参数默认是空值，交给下一层解析。</li>
+            <li><strong>前端继承与覆盖分开：</strong><code>paramDefaults</code> 合并后端与所选模板的 loop 值，只作 placeholder；<code>params</code> 初始为空，仅存用户输入或 preset。清空字段写 undefined，body 省略 undefined / 空字符串而保留合法零值。换模板更新继承显示，不覆盖显式值；应用 preset 则有意写入一组显式值。模板尚未加载/缺失/失败时阻止继续，不能假装无模板。</li>
+            <li><strong>后端 merge 与持久化：</strong><code>merge_params()</code> 从 DEFAULT_PARAMS 起步，拒绝未知 key，忽略 None，对 PARAM_BOUNDS 内字段检查数值范围，并检查 prompt 不长于 model context。create 存的是原始 <code>body.params</code> 和验证后的 plan；submit/render 再次 merge。因此台账不是所有最终默认值的冻结副本，未来修改默认实现可能影响再次渲染。</li>
+            <li><strong>落到具体配置：</strong><code>overrides()</code> 从 FIXED 构建受控 Hydra 参数，按 profile/LoRA 分支加入 plan 与训练参数；lr / gpu_memory_utilization 空值回退 planner，mini batch 空值回退 train batch，总步数有值才输出。<code>agent_loop_yaml()</code> 对三项通用 loop 参数按“truthy 显式参数 → 模板 → 通用默认”选择，再选择性传递 history / reward / failure-policy 等模板键；registered sessions 固定为 true。</li>
+          </ol>
+          <p class="note"><strong>零值边界：</strong>传输和 merge 会保留合法的零，例如 temperature=0、kl_loss_coef=0；但 loop 的 <code>params.get(k) or …</code> 会把零视为回退，不可推论“每个数值字段都支持零覆盖”。也不是任意 Hydra 字符串透传：未知训练 key 会拒绝，固定 GRPO / toolkit 接入契约不是公开的任意覆盖面。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="33" data-line-end="128" data-symbol="FIXED / DEFAULT_PARAMS / AGENT_LOOP_DEFAULTS / merge_params">backend/app/render/train.py:33–128 · FIXED / DEFAULT_PARAMS / AGENT_LOOP_DEFAULTS / merge_params</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="96" data-line-end="183" data-symbol="NumField / RunWizard">frontend/src/pages/Runs.tsx:96–183 · NumField / defaultsReady / paramDefaults / body</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="146" data-line-end="196" data-symbol="defaults / create">backend/app/routers/runs.py:146–196 · defaults / create 保存原始 params</a>
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="41" data-line-end="80" data-symbol="render">backend/app/services/runs.py:41–80 · render 再次 merge 与装配</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="153" data-line-end="199" data-symbol="overrides">backend/app/render/train.py:153–199 · overrides 的参数回退</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · agent_loop_yaml 的模板继承与固定安全键</a>
+          </div>
+          <h3>6.3 预览与费用确认：创建前后仍有两道校验</h3>
+          <p>向导先用 <code>POST /api/runs/preview</code> 验证 Runtime、Dataset、模型/参数并生成 plan、价格估算与可选 Training Plan 检查结果；确认费用后才 <code>POST /api/runs</code>，显式带 <code>confirm_cost:true</code>。服务端重新验证并要求区域 ready，随后提交 Run 与 Job。preview 不是“预留 GPU”，也不保证之后的异步 preflight / image / capacity 成功。</p>
+          <p>estimate 的 hourly 是单节点价×nodes，有 max_hours 才计算 max_cost；Training Plan 的 GPU 运行单价可记为零，因为预付费用不在该增量估算内。前端初始 max_hours=6，<strong>API 默认却为 None</strong>，所以“所有 Run 都有六小时硬限制”是错误说法。Run resume 也没有新费用确认字段，见 <a href="#recovery">恢复边界</a>。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="64" data-line-end="143" data-symbol="_estimate / _validate">backend/app/routers/runs.py:64–143 · _estimate / _validate</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="185" data-line-end="214" data-symbol="next / submit">frontend/src/pages/Runs.tsx:185–214 · next / submit / canNext</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="398" data-line-end="407" data-symbol="Confirm">frontend/src/pages/Runs.tsx:398–407 · 费用 Confirm</a>
+          </div>
+        </section>
+        <section id="training-flow" aria-labelledby="training-flow-title">
+          <h2 id="training-flow-title"><span class="section-no">07</span> 一次 Run 的完整链路</h2>
+          <p class="lead">一个 Run 横跨短 HTTP 请求、长时间 Job 与外部训练进程。下图按“提交 → 采样训练 → 观测收尾”分成连续面板；纵向表示先后，<strong>并不表示各参与者共享事务或同一时钟</strong>。</p>
+          <figure id="training-sequence" class="sequence-figure" aria-labelledby="training-sequence-caption">
+            <div class="sequence-panels">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 560" role="img" aria-labelledby="seq-submit-title seq-submit-desc">
+                <title id="seq-submit-title">训练时序 A：从 draft 到 RayJob 提交</title>
+                <desc id="seq-submit-desc">步骤一至四：UI 请求 preview 并取得计划估算，用户确认费用后 create。API 分别提交 Run 与 Job；引擎执行 preflight、image、capacity，submit 检查同名对象后创建 RayJob。UI 已取得 ID，可独立轮询。</desc>
+                <defs><marker id="seq-submit-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#315d65"/></marker></defs>
+                <text x="18" y="30" class="diagram-title">A · 提交与准备（时间向下）</text>
+                <rect x="15" y="48" width="102" height="42" rx="6" class="box"/><text x="66" y="75" text-anchor="middle">UI / draft</text>
+                <rect x="151" y="48" width="130" height="42" rx="6" class="accent-box"/><text x="216" y="75" text-anchor="middle">API / Engine</text>
+                <rect x="315" y="48" width="110" height="42" rx="6" class="box"/><text x="370" y="75" text-anchor="middle">AWS / K8s</text>
+                <path d="M66 92 V527 M216 92 V527 M370 92 V527" class="data-arrow"/>
+                <text x="76" y="121" class="diagram-small">1 · preview</text><path d="M66 132 H214" class="arrow" marker-end="url(#seq-submit-arrow)"/>
+                <text x="76" y="158" class="diagram-small">plan / estimate</text><path d="M216 170 H69" class="data-arrow" marker-end="url(#seq-submit-arrow)"/>
+                <text x="76" y="207" class="diagram-small">2 · 确认费用 → create</text><path d="M66 219 H214" class="arrow" marker-end="url(#seq-submit-arrow)"/>
+                <rect x="146" y="234" width="250" height="68" rx="6" class="box"/>
+                <text x="160" y="260" class="diagram-small">Run commit → Job commit → 排队</text><text x="160" y="285" class="diagram-small">两个提交；非跨系统原子事务</text>
+                <text x="76" y="325" class="diagram-small">返回 Run / Job ID</text><path d="M216 337 H69" class="data-arrow" marker-end="url(#seq-submit-arrow)"/>
+                <rect x="146" y="360" width="250" height="66" rx="6" class="accent-box"/>
+                <text x="160" y="386" class="diagram-small">3 · preflight → image</text><text x="160" y="410" class="diagram-small">→ capacity：查询 / 条件扩容</text>
+                <path d="M216 442 H368" class="arrow" marker-end="url(#seq-submit-arrow)"/>
+                <text x="91" y="474" class="diagram-small">4 · submit：ConfigMap + RayJob</text>
+                <text x="91" y="498" class="diagram-small">确定性 attempt 名；先查再建 → B</text>
+                <text x="18" y="547" class="diagram-small">UI 此后独立轮询，不持有 create 等待训练结束</text>
+              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 550" role="img" aria-labelledby="seq-rollout-title seq-rollout-desc">
+                <title id="seq-rollout-title">训练时序 B：Ray、AgentCore 与模型回连</title>
+                <desc id="seq-rollout-desc">步骤五至八：Ray head 的 driver 拉取数据与模型，运行 verl。toolkit AgentLoop 调用 AgentCore，Agent 的模型请求回连 gateway，再到 vLLM，模型响应返回 Agent。Agent 结果奖励按 toolkit 接口和 S3 契约供训练侧消费。没有 FastAPI webhook，toolkit 内部没有在本任务审计。</desc>
+                <defs><marker id="seq-rollout-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#315d65"/></marker></defs>
+                <text x="18" y="30" class="diagram-title">B · 训练与 rollout（接续 A）</text>
+                <rect x="12" y="48" width="125" height="64" rx="6" class="accent-box"/><text x="74" y="73" text-anchor="middle">Ray / verl</text><text x="74" y="98" text-anchor="middle" class="diagram-small">toolkit AgentLoop</text>
+                <rect x="162" y="48" width="110" height="64" rx="6" class="box"/><text x="217" y="73" text-anchor="middle">AgentCore</text><text x="217" y="98" text-anchor="middle" class="diagram-small">Agent / 工具</text>
+                <rect x="294" y="48" width="134" height="64" rx="6" class="accent-box"/><text x="361" y="73" text-anchor="middle">gateway 18765</text><text x="361" y="98" text-anchor="middle" class="diagram-small">→ vLLM（GPU）</text>
+                <path d="M74 114 V463 M217 114 V463 M361 114 V463" class="data-arrow"/>
+                <rect x="18" y="130" width="399" height="61" rx="6" class="box"/>
+                <text x="31" y="155" class="diagram-small">5 · driver：S3 数据 / HF 模型 → FSx</text><text x="31" y="179" class="diagram-small">main_ppo · GRPO / agentcore_sync</text>
+                <text x="84" y="223" class="diagram-small">6 · 调用 rollout</text><path d="M74 235 H215" class="arrow" marker-end="url(#seq-rollout-arrow)"/>
+                <text x="168" y="270" class="diagram-small">7 · 模型请求回连</text><path d="M217 282 H359" class="arrow" marker-end="url(#seq-rollout-arrow)"/>
+                <text x="240" y="311" class="diagram-small">模型响应</text><path d="M361 323 H219" class="data-arrow" marker-end="url(#seq-rollout-arrow)"/>
+                <text x="84" y="362" class="diagram-small">8 · 结果 / 奖励</text><path d="M217 374 H76" class="data-arrow" marker-end="url(#seq-rollout-arrow)"/>
+                <text x="25" y="410" class="diagram-small">经 toolkit 接口 / S3 契约消费，继续训练</text><text x="25" y="438" class="diagram-small">可重复多轮；token / logprob / 权重同步未审计</text>
+                <rect x="18" y="477" width="399" height="54" rx="6" class="external-box"/>
+                <text x="31" y="500" class="diagram-small">模型回连在训练面；不是 FastAPI webhook</text><text x="31" y="522" class="diagram-small">vLLM async 不表示整个策略更新异步</text>
+              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 520" role="img" aria-labelledby="seq-observe-title seq-observe-desc">
+                <title id="seq-observe-title">训练时序 C：产物、监控与页面回显</title>
+                <desc id="seq-observe-desc">步骤九至十一：完整 checkpoint 写 FSx，日志与索引周期同步 S3。monitor 拉 RayJob 状态和 S3 日志，写 Run、Metric 与 Job detail；按失败、预算或取消分支处理。成功后 finalize 读末尾指标与索引、删除 RayJob并条件缩容。页面以自己的轮询周期请求 API，不是后端推送。</desc>
+                <defs><marker id="seq-observe-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#315d65"/></marker></defs>
+                <text x="18" y="30" class="diagram-title">C · 观测与收尾（与 B 部分并行）</text>
+                <rect x="12" y="48" width="123" height="42" rx="6" class="box"/><text x="73" y="75" text-anchor="middle">训练 / 产物</text>
+                <rect x="155" y="48" width="125" height="42" rx="6" class="accent-box"/><text x="217" y="75" text-anchor="middle">monitor / API</text>
+                <rect x="306" y="48" width="121" height="42" rx="6" class="box"/><text x="366" y="75" text-anchor="middle">UI 轮询</text>
+                <path d="M73 92 V482 M217 92 V482 M366 92 V482" class="data-arrow"/>
+                <rect x="18" y="113" width="399" height="64" rx="6" class="box"/>
+                <text x="31" y="139" class="diagram-small">9 · FSx：完整 checkpoint</text><text x="31" y="163" class="diagram-small">S3：约 30 秒同步日志 / checkpoint 索引</text>
+                <text x="84" y="207" class="diagram-small">10 · 查询状态 / 日志</text><path d="M217 219 H75" class="arrow" marker-end="url(#seq-observe-arrow)"/>
+                <path d="M73 250 H215" class="data-arrow" marker-end="url(#seq-observe-arrow)"/>
+                <rect x="119" y="267" width="298" height="75" rx="6" class="accent-box"/>
+                <text x="132" y="291" class="diagram-small">写 Run / Metric / Job detail</text><text x="132" y="314" class="diagram-small">分支：有限 attempt 重试 / 预算 / 取消</text><text x="132" y="335" class="diagram-small">失败 hook 不等于必然清完资源</text>
+                <text x="184" y="370" class="diagram-small">11 · GET 资源 / Job / 日志</text><path d="M366 382 H219" class="arrow" marker-end="url(#seq-observe-arrow)"/>
+                <path d="M217 411 H364" class="data-arrow" marker-end="url(#seq-observe-arrow)"/>
+                <text x="24" y="451" class="diagram-small">成功 → finalize：末尾指标 / 索引 / 释放 RayJob</text><text x="24" y="475" class="diagram-small">scale_down_after + 同池 Run 判闲 → 尝试缩零</text>
+                <text x="18" y="506" class="diagram-small">虚点线横箭头为响应；UI 不是云资源事件订阅器</text>
+              </svg>
+            </div>
+            <figcaption id="training-sequence-caption">图 2 · 一次 Run 的跨层时序，A → B → C 连续阅读。图 B 的结果箭头抽象 toolkit / S3 接入契约，不声称具体同步返回协议已审计；C 的观察与训练并行、允许延迟。三幅面板的完整等价文字如下。</figcaption>
+          </figure>
+          <div class="equivalent">
+            <strong>训练时序图的等价编号文字（1–11 对应图内编号）</strong>
+            <ol>
+              <li>页面用当前 draft 请求 preview。后端校验并返回 plan / estimate / 可选 Training Plan 信息；这不是预留容量。</li>
+              <li>用户明确确认费用后 create 再次校验；Run 入库与 Job.start 分别提交。HTTP 返回 Run / Job ID，UI 导航详情，不等待训练结束。</li>
+              <li>线程池先执行 preflight，再 image（复用镜像或等待独立 trainer.build），然后 capacity（查真实池状态、按 scale_up 条件扩容/等待）。</li>
+              <li>submit 生成 ConfigMap、脚本与 RayJob，名称包含 attempt。提交后进入 monitor；先查同名对象再创建的逻辑降低重复操作，不构成跨进程 exactly-once。</li>
+              <li>Ray head 上的 driver 把 S3 数据与 HF 模型落到共享 FSx，运行 <code>verl.trainer.main_ppo</code>。head 占一整个 GPU 节点，另有 nodes−1 个 GPU workers；system CPU 节点只跑轻量 submitter。</li>
+              <li>训练配置固定为 GRPO / agentcore_sync，PayloadDataset 与 toolkit AgentCoreAgentLoop 发起 AgentCore rollout；本仓库提供 runtime、bucket、exp_id 与 loop 配置。</li>
+              <li>Agent 的模型客户端使用 <code>_rollout.base_url / model_id / api_key</code> 回连 GPU 训练侧 gateway，再到 vLLM；响应回 Agent，工具与多轮交互可继续。不是 AgentCore 调 FastAPI webhook。</li>
+              <li>Agent 输出结果/奖励，toolkit 按其接口和 S3 契约交给训练侧消费。轨迹 token/logprob 对齐、会话注册执行和权重同步属于外部实现，本文没有验证；vLLM 的 async 配置不等于整个策略更新异步。</li>
+              <li>训练 checkpoint 数据留在 FSx；脚本每约 30 秒及正常 EXIT trap 尝试向 S3 复制训练日志和 checkpoint 索引。失败可被忽略，所以观测允许滞后，不保证每次最后一行已上传。</li>
+              <li>monitor 轮询 RayJob 与 S3 日志，解析数值指标、累计估算成本、写 Run.progress / RunMetric / stage detail；进入成功、有限 attempt 重试、guard 失败、预算停止或协作取消分支。</li>
+              <li>UI 用自己的 GET 轮询取 Run、Job、曲线和日志；成功路径 finalize 再取末尾指标/索引、释放 RayJob，并在开关和同池判闲满足时尝试缩零。失败 hook 另走条件清理，不是 finalize 的无条件替代。</li>
+            </ol>
+          </div>
+          <div class="sources" aria-label="训练时序源码依据">
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="178" data-line-end="214" data-symbol="body / next / submit">frontend/src/pages/Runs.tsx:178–214 · body / next / submit（步骤 1–2）</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="151" data-line-end="196" data-symbol="preview / create">backend/app/routers/runs.py:151–196 · preview / create（步骤 1–2）</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="263" data-line-end="297" data-symbol="_submit / stage_submit">backend/app/pipelines/run.py:263–297 · _submit / stage_submit（步骤 4）</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="308" data-line-end="367" data-symbol="train_script">backend/app/render/train.py:308–367 · train_script（步骤 5、9）</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="470" data-line-end="526" data-symbol="rayjob">backend/app/render/train.py:470–526 · rayjob（head / worker / submitter）</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · agent_loop_yaml（步骤 6–8 接入契约）</a>
+            <a class="source-ref" href="../templates/gsm8k_math/agent/rl_app.py" data-line-start="32" data-line-end="61" data-symbol="invoke_agent">templates/gsm8k_math/agent/rl_app.py:32–61 · invoke_agent 的模型请求与 rewards（步骤 7–8）</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="472" data-symbol="stage_monitor / stage_finalize">backend/app/pipelines/run.py:392–472 · stage_monitor / stage_finalize（步骤 10–11）</a>
+          </div>
+          <h3>7.1 六个 stage：哪些步骤能等、能跳、能重提</h3>
+          <div class="table-wrap"><table>
+            <caption>run.train 注册顺序；阶段成功才持久化为 succeeded</caption>
+            <thead><tr><th scope="col">stage</th><th scope="col">关键行为与失败边界</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">1 · preflight</th><td>要求 Cluster ready、Runtime ready 且有 ARN、Dataset 有 train split；多节点实例必须支持 EFA。成功后写 preparing 与首次 started_at；不是重新运行区域 setup 或完整云验收。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="93" data-line-end="110" data-symbol="stage_preflight">backend/app/pipelines/run.py:93–110 · stage_preflight</a></td></tr>
+              <tr><th scope="row">2 · image</th><td>按区域/profile 获取 TrainerImage；保存 trainer_image_id，再等 ready 并保存 image URI。构建失败抛 run.image_failed；等待间隔 30 秒、超时 6 小时，构建 Job 本身独立。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="113" data-line-end="137" data-symbol="stage_image">backend/app/pipelines/run.py:113–137 · stage_image</a></td></tr>
+              <tr><th scope="row">3 · capacity</th><td>HyperPod 支持 On-Demand / Spot / Training Plan，EC2 node group 只支持前两者。容量不足且 scale_up=false 则失败；否则按 provider 检查/补充，再写 waiting_capacity，以 30 秒间隔等待，默认容量超时 4 小时。EC2 的可用数结合可调度 GPU Node 与 ASG InService，避免把正在终止的节点当容量；不等于 GPU 健康实测。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="144" data-line-end="260" data-symbol="_capacity_ec2 / stage_capacity">backend/app/pipelines/run.py:144–260 · _capacity_ec2 / stage_capacity</a><a class="source-ref" href="../backend/app/services/pools.py" data-line-start="169" data-line-end="223" data-symbol="state">backend/app/services/pools.py:169–223 · state</a></td></tr>
+              <tr><th scope="row">4 · submit</th><td>已有 rayjob_name 且不是 resume 时直接跳过提交，交 monitor 判断实际对象；否则渲染 <code>run-id-aN</code>，apply ConfigMap、get 同名 RayJob，缺失才 apply。记录 hydra / attempt / running。恢复依赖台账和具体查询，不能假定旧云对象仍健在。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="263" data-line-end="297" data-symbol="_submit / stage_submit">backend/app/pipelines/run.py:263–297 · _submit / stage_submit</a><a class="source-ref" href="../backend/app/services/runs.py" data-line-start="18" data-line-end="27" data-symbol="rayjob_name / run_dir">backend/app/services/runs.py:18–27 · rayjob_name / run_dir</a></td></tr>
+              <tr><th scope="row">5 · monitor</th><td>读状态、日志、成本后，先判断预算，再判断训练成功；失败/STOPPED/deployment Failed 或命名对象消失进入 guard / retry 分支。重试上限默认 2 次（首次提交之外）；同 Job 内重提，不重新走 image / capacity。单个 monitor 没有无条件总超时，依赖外部 RayJob、可选预算/deadline和取消。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="457" data-symbol="stage_monitor">backend/app/pipelines/run.py:392–457 · stage_monitor</a></td></tr>
+              <tr><th scope="row">6 · finalize</th><td>成功路径再摄取末尾指标、checkpoint 索引和费用，清 cost_at 并记 ended_at，尽力删除 RayJob；scale_down_after 为真才同池判闲并缩零。finalize 出错仍可能令最终 Job / Run failed。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="460" data-line-end="542" data-symbol="stage_finalize / _release_rayjob / _finished">backend/app/pipelines/run.py:460–542 · stage_finalize / _release_rayjob / _finished</a></td></tr>
+            </tbody>
+          </table></div>
+          <div class="sources"><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="545" data-line-end="555" data-symbol="register">backend/app/pipelines/run.py:545–555 · run.train 六 stage 注册</a></div>
+          <h3>7.2 训练配置与自然结束条件</h3>
+          <p>渲染器固定使用 <code>PayloadDataset</code>、<code>AgentCoreAgentLoop</code>、GRPO 与 <code>agentcore_sync</code>。FSDP LoRA 显式设置 safetensors load_format；Megatron 使用 <code>--config-name ppo_megatron_trainer</code>，LoRA 分支配置 merge。这些是接入约束，不是已经执行了 toolkit 内部训练审计。</p>
+          <p><code>total_epochs</code> 总会传给 verl；可选 <code>total_training_steps</code> 有值才输出。训练器据其配置完成或报错后，由 RayJob 状态被 monitor 观察；TuningPad 不自行实现优化循环。validation 没有显式选择集时优先用训练 Dataset 的 val split；若仍没有 val 文件，渲染会回退 train 文件，因此验证曲线不自动意味着独立留出评估。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="33" data-line-end="55" data-symbol="FIXED">backend/app/render/train.py:33–55 · FIXED</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="153" data-line-end="273" data-symbol="overrides">backend/app/render/train.py:153–273 · overrides（验证文件、epoch / steps 与后端分支）</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="327" data-line-end="334" data-symbol="train_script">backend/app/render/train.py:327–334 · Megatron config name</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="65" data-line-end="87" data-symbol="_context">backend/app/pipelines/run.py:65–87 · _context 的 val split 选择</a>
+          </div>
+          <h3>7.3 三类产物：不要把索引当 checkpoint 备份</h3>
+          <ul>
+            <li><strong>FSx：</strong><code>/fsx/runs/&lt;run_id&gt;/ckpt</code> 保存训练 checkpoint 数据；模型缓存、parquet 与训练日志也落共享盘。这里“完整 checkpoint”是与 S3 索引相对的存储说法，不承诺每种策略都保存优化器全状态；Megatron 分支显式设置 actor checkpoint <code>save_contents=[model]</code>。恢复仍取决于保留的数据和外部 trainer 的兼容性。</li>
+            <li><strong>S3 训练观测：</strong><code>runs/&lt;run_id&gt;/logs/train.log</code> 与 <code>ckpt_index.json</code> 周期上传；索引只列仍存在 <code>global_step_*/actor</code> 的 step，排除被轮转删除 actor 的空目录。索引可能滞后，不能代替 FSx 数据；<a href="#recovery">显式 export</a> 才合并模型并同步 S3。</li>
+            <li><strong>SQLite 指标：</strong>monitor 使用 byte offset 和未完成行 carry 读 S3 日志，<code>parse_chunk()</code> 提取 step 行数值；按 <code>(run_id, step, key)</code> 更新/插入 Metric。指标提交和 progress cursor 提交分离，重读可覆盖去重，不是 exactly-once 消费。Job 本地编排日志与 Run 训练日志仍为两条通道。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="26" data-line-end="58" data-symbol="run_dir / render">backend/app/services/runs.py:26–58 · run_dir / render 的 FSx 路径</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="344" data-line-end="357" data-symbol="sync_progress">backend/app/render/train.py:344–357 · train_script 内 sync_progress / EXIT trap</a>
+            <a class="source-ref" href="../backend/app/services/runs.py" data-line-start="159" data-line-end="202" data-symbol="read_log / ckpt_steps">backend/app/services/runs.py:159–202 · S3 read_log / ckpt_steps</a>
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="300" data-line-end="318" data-symbol="_ingest_metrics">backend/app/pipelines/run.py:300–318 · _ingest_metrics</a>
+            <a class="source-ref" href="../backend/app/metrics/verl_log.py" data-line-start="40" data-line-end="68" data-symbol="parse_line / parse_chunk">backend/app/metrics/verl_log.py:40–68 · parse_line / parse_chunk</a>
+          </div>
+        </section>
+        <section id="frontend-flow" aria-labelledby="frontend-flow-title">
+          <h2 id="frontend-flow-title"><span class="section-no">08</span> 前端数据流与反馈</h2>
+          <p class="lead">控制台是<strong>本地表单 + 服务器快照 + URL 页面身份</strong>的组合，不是推送式任务看板，也没有统一的全局资源缓存。收到 job_id 只表示已排队，不能乐观地把云资源显示为 ready。</p>
+          <h3>8.1 从入口到页面，再到统一 API 客户端</h3>
+          <p><code>main.tsx</code> 加载样式与 i18n，用 StrictMode 包住 <code>AuthGate → App</code>；认证未决先显示等待，登录后才渲染业务。App 懒加载页面，Shell 提供导航、语言、Toast 与 Suspense/Outlet。Setup 在 <code>/settings</code>，Trainer 镜像卡片在 <code>/resources</code>；训练后功能分为 <code>/exports</code>、<code>/inference</code>、<code>/evals</code>，不是一个隐藏的自动后处理阶段。</p>
+          <p>资源页面通过 query 保存子页身份：例如 <code>/runs?view=detail&amp;id=&lt;run_id&gt;&amp;tab=metrics</code>，不是 <code>/runs/:id</code>。view=new 进入向导，view=detail 加 id 进入详情，否则列表；tab 在详情中独立读取。导航和刷新可重建页面身份，但不会还原未提交的整个 draft。</p>
+          <p>所有请求经 <code>lib/api.ts</code> 的 request / requestForm，带 same-origin cookie。非成功 HTTP 响应变为 <code>ApiError(code, detail, status)</code>，稳定 code 对应 <code>apiErrors.&lt;code&gt;</code> 翻译；非 auth API 的 401 发出认证失效事件，AuthGate 返回登录。HTTP 200 的 Job 查询仍可能携带内部失败状态，这由 JobPanel 单独展示，不等同 HTTP 错误。DTO 仅有 TypeScript 类型断言，没有运行时 JSON schema 校验。</p>
+          <div class="sources">
+            <a class="source-ref" href="../frontend/src/main.tsx" data-line-start="1" data-line-end="18" data-symbol="StrictMode / AuthGate">frontend/src/main.tsx:1–18 · StrictMode / AuthGate / App</a>
+            <a class="source-ref" href="../frontend/src/App.tsx" data-line-start="6" data-line-end="43" data-symbol="App">frontend/src/App.tsx:6–43 · lazy pages / App 路由</a>
+            <a class="source-ref" href="../frontend/src/v2/Shell.tsx" data-line-start="28" data-line-end="117" data-symbol="Shell">frontend/src/v2/Shell.tsx:28–117 · Shell</a>
+            <a class="source-ref" href="../frontend/src/pages/Resources.tsx" data-line-start="68" data-line-end="80" data-symbol="ResourcesPage / resources.trainerImages">frontend/src/pages/Resources.tsx:68–80 · ResourcesPage 的 Trainer 镜像卡片</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="582" data-line-end="589" data-symbol="RunsPage">frontend/src/pages/Runs.tsx:582–589 · RunsPage</a>
+            <a class="source-ref" href="../frontend/src/lib/api.ts" data-line-start="6" data-line-end="64" data-symbol="ApiError / parseResponse / request">frontend/src/lib/api.ts:6–64 · ApiError / parseResponse / request / errorMessage</a>
+            <a class="source-ref" href="../frontend/src/auth/AuthGate.tsx" data-line-start="10" data-line-end="64" data-symbol="AuthGate">frontend/src/auth/AuthGate.tsx:10–64 · AuthGate / refresh / unauthorized 事件</a>
+          </div>
+          <h3>8.2 状态所有者决定刷新与竞态边界</h3>
+          <div class="table-wrap"><table>
+            <caption>三类核心状态与两种辅助状态：同名 key 不代表共享缓存</caption>
+            <thead><tr><th scope="col">状态与所有者</th><th scope="col">实际行为 / 不能推导的保证</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">draft · 页面 useState</th><td>RunWizard 存选中 ID、params、compute、step、preview、busy 与 confirm。派生对象从当前快照和 ID 查找；提交时 body() 组装 payload。busy 是交互控制，不是服务端幂等键或全局操作锁。</td></tr>
+              <tr><th scope="row">server snapshot · useLoad</th><td>每个 hook 独立存 data/error/loading，key/nonce 变化触发 effect，reload() 只加 nonce、返回 void。加载和失败时保留旧 data；cleanup 的 live 标记忽略过期 effect 写回，但不 abort 请求。不能 await reload 等新快照，也不会跨页面自动失效。</td></tr>
+              <tr><th scope="row">URL · view/id/tab</th><td>标识列表/向导/详情与当前 tab。详情切 tab 保留 view 与 id；并不持久化未提交表单、费用确认或全部服务器状态。</td></tr>
+              <tr><th scope="row">Job · useJob</th><td>首次主动 load；job ID 变化重置旧状态，再以 2.5 秒间隔查 queued/running Job。onDone 只在<strong>已观察到 live → terminal</strong>时调用，首次读到终态不调用。其 async load 没有 useLoad 的过期响应隔离，慢请求竞态不能一概排除。</td></tr>
+              <tr><th scope="row">Auth / Toast / 语言</th><td>使用窄职责 Context 与 i18next，不是 Redux/React Query 式通用资源 store。sidebar 和语言偏好可单独持久化，不代表训练表单也持久化。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="sources">
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="118" data-line-end="183" data-symbol="RunWizard">frontend/src/pages/Runs.tsx:118–183 · RunWizard 本地状态与 body</a>
+            <a class="source-ref" href="../frontend/src/v2/hooks.ts" data-line-start="26" data-line-end="64" data-symbol="Loaded / useLoad">frontend/src/v2/hooks.ts:26–64 · Loaded / useLoad</a>
+            <a class="source-ref" href="../frontend/src/lib/useJob.ts" data-line-start="6" data-line-end="35" data-symbol="LIVE_JOB / useJob">frontend/src/lib/useJob.ts:6–35 · LIVE_JOB / useJob</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="452" data-line-end="511" data-symbol="RunDetail">frontend/src/pages/Runs.tsx:452–511 · RunDetail / tab</a>
+            <a class="source-ref" href="../frontend/src/i18n.ts" data-line-start="1" data-line-end="24" data-symbol="i18n">frontend/src/i18n.ts:1–24 · i18n 初始化与语言检测</a>
+          </div>
+          <h3>8.3 轮询闭环：页面主动拉，不是后端推</h3>
+          <p class="flow">用户操作 → API 返回资源 / Job ID → owner 导航或 reload → useJob 观察终态转换 → JobPanel.onDone → owner 再 reload</p>
+          <p><code>usePoll()</code> 只设 interval，不立即调用、不串行化异步请求，也不主动在隐藏页暂停。初次加载来自 useLoad / useJob / 专用 effect。列表常用 8 秒；Job 2.5 秒；Run 详情活跃时 10 秒、非活跃时 60 秒；Cluster 详情活跃时 5 秒、否则 16 秒。一个资源可能同时有列表、详情、Job 和日志请求，不是一条原子一致的快照流。</p>
+          <ul>
+            <li><strong>阶段：</strong>JobPanel 用 StageBar 显示 Job.stages 的 name/status/detail/耗时；仅 failed/cancelled 显示 retry，active 显示 cancel。retry 调用复用 Job 的 API，不是创建新 Run。</li>
+            <li><strong>JobLog：</strong>按服务端 next_offset 字节游标增量追加，每次 tick 最多读 40 块，job ID 改变时清游标；与 Run 训练日志不同。</li>
+            <li><strong>RunLog / 曲线：</strong>RunLog 首次 effect 加活跃时 10 秒轮询，最多每 tick 20 块，保留最后 400000 字符、去 ANSI 颜色。详情使用 Run 响应中的 series 与 progress.ckpt_steps，Pod 摘要另行查询；这不是每个 tab 都独立持续轮询全部 API。Pod 查询失败可显示空列表，不能从 UI 空白断言云端不存在 Pod。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../frontend/src/lib/poll.ts" data-line-start="3" data-line-end="15" data-symbol="usePoll">frontend/src/lib/poll.ts:3–15 · 常量 / usePoll</a>
+            <a class="source-ref" href="../frontend/src/components/JobPanel.tsx" data-line-start="13" data-line-end="140" data-symbol="StageBar / JobLog / JobPanel">frontend/src/components/JobPanel.tsx:13–140 · StageBar / JobLog / JobPanel</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="414" data-line-end="477" data-symbol="RunLog / RunDetail">frontend/src/pages/Runs.tsx:414–477 · RunLog / RunDetail</a>
+            <a class="source-ref" href="../frontend/src/pages/Clusters.tsx" data-line-start="729" data-line-end="753" data-symbol="ClusterDetail">frontend/src/pages/Clusters.tsx:729–753 · ClusterDetail 轮询与 Job ID</a>
+            <a class="source-ref" href="../frontend/src/lib/api.ts" data-line-start="670" data-line-end="685" data-symbol="runApi">frontend/src/lib/api.ts:670–685 · runApi 的各观察通道</a>
+            <a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="480" data-line-end="555" data-symbol="RunDetail">frontend/src/pages/Runs.tsx:480–555 · RunDetail 的 JobPanel / series / ckpt_steps 渲染</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="228" data-line-end="241" data-symbol="get_run">backend/app/routers/runs.py:228–241 · get_run 将 series 放入 Run 响应</a>
+          </div>
+          <aside class="warning"><p><strong>显示正确还需要输入契约：</strong>向导的 defaultsReady 会在模板元数据未决时阻止继续；placeholder 不能复制成提交覆盖。另一个静态局限是 RunWizard 的实例目录请求固定 <code>us-east-1</code>，不能将其当作所选集群区域的实时价格/配额；实际 preview 估算使用 Runtime 的区域。前端校验、类型和 busy 都不能代替后端验证、费用确认及云状态检查。</p><a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="138" data-line-end="168" data-symbol="compute / instances / defaultsReady">frontend/src/pages/Runs.tsx:138–168 · compute / instances / defaultsReady</a></aside>
+        </section>
+        <section id="recovery" aria-labelledby="recovery-title">
+          <h2 id="recovery-title"><span class="section-no">09</span> 失败、恢复与清理</h2>
+          <p class="lead">遇到失败，先问“哪个对象、哪一层失败”，再谈继续。<a href="#job-engine">第 4 章</a>已区分启动恢复、Job retry、monitor attempt 重试和 Run resume；这里补上训练终止与资源处置条件。<strong>重跑不等于回滚，清理意图也不等于即时停费。</strong></p>
+          <h3>9.1 monitor 的分支顺序与终止条件</h3>
+          <div class="table-wrap"><table>
+            <caption>每次监控先写观测值，再按顺序判断；外部 API 异常仍可能直接令 stage 失败</caption>
+            <thead><tr><th scope="col">检测到什么</th><th scope="col">实现如何行动</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">预算估算达到阈值</th><td>在成功/失败状态判断之前，先 delete RayJob 再抛 <code>run.budget_exceeded</code>。删除若抛异常，不保证走到该稳定错误码；它是后端轮询守卫，不是 AWS 账单硬上限。</td></tr>
+              <tr><th scope="row">外部成功</th><td><code>job=SUCCEEDED</code>，或 <code>deployment=Complete</code> 且 job 不为 FAILED：写 Run succeeded，退出 monitor，进入 finalize。GPU 池是否缩零另看开关与同池 Run。</td></tr>
+              <tr><th scope="row">外部失败 / 停止 / 对象丢失</th><td><code>FAILED / STOPPED / deployment Failed</code> 或有 name 却查询不到对象：先查最新 attempt 日志里的 <code>RolloutFailureGuardError</code>，命中以 <code>run.rollout_failure_guard</code> 失败，不自动续训；未命中才检查 retries 上限。不是把全部 Agent 错误统一归成基础设施瞬态失败。</td></tr>
+              <tr><th scope="row">允许自动重试</th><td>默认最多两次，Compute 允许 0–10。先尝试从日志和 Pod 映射找 GPU 硬件故障节点，按同池规则替换；探测/替换异常只记日志，不阻断原重试。删旧 RayJob，retries+1、Run retrying，等 30 秒，再 attempt+1 提交并恢复 running。仍是同一 Job 的 monitor stage，借原 FSx 目录和 verl auto 恢复。</td></tr>
+              <tr><th scope="row">收到协作取消</th><td>monitor 捕获 JobCancelled 时，若有 RayJob 则删除，再记 stopped、ended_at 与成本、尝试摄取末尾指标，然后向引擎重抛。阻塞调用不是可强制打断的；在其他阶段取消不等于执行过这一分支。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="351" data-line-end="457" data-symbol="_faulty_nodes / _replace_faulty_nodes / _non_retryable / stage_monitor">backend/app/pipelines/run.py:351–457 · 故障节点 / 非重试 guard / stage_monitor</a>
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="28" data-line-end="40" data-symbol="Compute">backend/app/routers/runs.py:28–40 · Compute.max_retries</a>
+          </div>
+          <p class="warning"><strong>手动继续仍有成本与数据前提：</strong>Run resume 只拒绝当前 active 状态，复用 Run ID，清错误/ended_at、重置 retries，然后创建新 Job；没有新 confirm_cost 参数。Job retry 则复用原 Job/context 并跳过成功 stage；它不会自动重建所有依赖或清空 Run.retries。两者都不能保证丢失的 FSx checkpoint、已删 Runtime 或失效镜像可恢复；尤其不要在确定性 guard 失败后把盲目 resume 当修复。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="284" data-line-end="301" data-symbol="stop / resume">backend/app/routers/runs.py:284–301 · stop / resume</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="219" data-line-end="254" data-symbol="retry / cancel / resume_pending">backend/app/jobs/engine.py:219–254 · retry / cancel / resume_pending</a>
+          </div>
+          <h3>9.2 成功、失败、取消：清理并不对称</h3>
+          <ul>
+            <li><strong>成功：</strong>finalize 先摄取产物与费用，再调用 _release_rayjob；该函数捕获删除异常并记日志。只有 scale_down_after=true 才尝试同池缩零，不要求关闭自动缩容才能释放已结束 RayJob。</li>
+            <li><strong>失败：</strong>finish hook 写 Run failed；只有 scale_down_after=true 才走 RayJob 释放与同池缩容尝试，该段异常被吞掉。关闭开关可能保留最终失败 RayJob 和容量；不能说所有失败都会自动清云。</li>
+            <li><strong>取消：</strong>hook 映射为 Run stopped；开关开启时尝试缩容，但 hook 对 cancelled 跳过 RayJob 释放，依赖 monitor 的删除分支。因此阶段边界取消、queued cancel 与 hook 异常均有不同残留风险，详见第 4 章，未做竞态复现。</li>
+            <li><strong>判闲不是全局资源仲裁：</strong>scale_down_if_idle 只查同 cluster / instance_group 的 running、retrying、preparing、waiting_capacity Run；不含 queued，也不遍历推理端点或所有 Pod。guardian 改从 Pod 忙闲判断，是不同保护层，不能把两者合成全局 reconciliation。</li>
+          </ul>
+          <p>RayJob manifest 的 <code>shutdownAfterJobFinishes</code>、600 秒 TTL 与主动 delete 是不同机制；都依赖外部控制器实际执行。删除训练 Job 或将 GPU 数量降零也不会删除 EKS system 节点、FSx、NLB、AgentCore 等全部资源，更不表示所有费用归零。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="460" data-line-end="542" data-symbol="stage_finalize / _release_rayjob / scale_down_if_idle / _finished">backend/app/pipelines/run.py:460–542 · finalize / release / scale_down_if_idle / finish hook</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="470" data-line-end="475" data-symbol="rayjob">backend/app/render/train.py:470–475 · RayJob shutdown / TTL / backoff</a>
+          </div>
+          <h3>9.3 可选产物分支：export → inference → eval</h3>
+          <p>这不是 run.train 的第七到第九 stage，而是三个独立对象及 Job。也可以直接部署 HF 基座做比较，不必先训练或导出。</p>
+          <div class="table-wrap"><table>
+            <caption>训练后分支、存储位置与容量责任</caption>
+            <thead><tr><th scope="col">分支 / stage</th><th scope="col">行为与边界</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">export.merge<br><code>merge</code></th><td>选某个 step 的 FSx actor checkpoint，调用 <code>verl.model_merger</code> 合并至 <code>/fsx/exports/&lt;export_id&gt;</code> 后显式 sync 到 S3 exports 前缀。小模型在 CPU system 节点、大模型借 GPU 节点的主机内存；merge 仍是 CPU 工作，CUDA 镜像设置 NVIDIA_VISIBLE_DEVICES=void。pipeline 没有自动扩容 stage；训练后池已缩零时，大模型 merge 可能没有可调度容量。<a class="source-ref" href="../backend/app/services/serving.py" data-line-start="22" data-line-end="92" data-symbol="merge_job / merge_resources">backend/app/services/serving.py:22–92 · merge_job / merge_resources</a><a class="source-ref" href="../backend/app/pipelines/serving.py" data-line-start="40" data-line-end="106" data-symbol="stage_merge / register">backend/app/pipelines/serving.py:40–106 · stage_merge / export.merge 注册</a></td></tr>
+              <tr><th scope="row">inference.deploy<br><code>deploy</code></th><td>模型源为 HF 或 succeeded Export；export 源从共享 FSx export_dir 读取，并非自动从 S3 还原。创建 API-key Secret、vLLM Deployment 与 internal NLB Service，等待副本和 URL ready。查已有 GPU 池，但本 pipeline 不自动扩容。删除 Job 按 Service → Deployment → Secret 顺序处理，并标 Endpoint deleted。<a class="source-ref" href="../backend/app/pipelines/serving.py" data-line-start="112" data-line-end="183" data-symbol="stage_deploy_endpoint / stage_delete_endpoint">backend/app/pipelines/serving.py:112–183 · deploy / delete endpoint</a><a class="source-ref" href="../backend/app/services/serving.py" data-line-start="201" data-line-end="223" data-symbol="vllm_manifests">backend/app/services/serving.py:201–223 · internal NLB Service</a></td></tr>
+              <tr><th scope="row">eval.run<br><code>observability → evaluate</code></th><td>要求 ready Endpoint 与同集群 ready Runtime。backend 的 RolloutClient 调 AgentCore，Agent 请求指定 vLLM endpoint；取指定 split 的前 N 条，不是随机全数据集验收。逐条写结果 JSONL，记录 success/error/elapsed/session_id 与奖励统计，完成后上传 S3。评测任务成功不代表每个样本成功，也不证明模型质量提升。<a class="source-ref" href="../backend/app/pipelines/serving.py" data-line-start="189" data-line-end="317" data-symbol="_payloads / stage_eval / stage_eval_observability">backend/app/pipelines/serving.py:189–317 · _payloads / stage_eval / observability / 注册</a></td></tr>
+            </tbody>
+          </table></div>
+          <p>Export 模型的 eval 默认读取关联 Run 的参数，使单轮 max_tokens 与训练 validation 的 max_tokens_per_turn、temperature 与 val_temperature 对齐；可用 sampling override 覆盖。直接评估 HF 基座时没有关联 Run 参数，做公平 A/B 需要显式对齐采样和样本，不能仅凭曲线横比。</p>
+          <p>可选 observability 使用同镜像/网络的 <code>_obs</code> twin runtime，而非给训练 runtime 加 OTEL。Transaction Search 是账户/区域级变更，必须单独确认；样本 session_id 用于后续 CloudWatch trace 查询，不是训练 webhook 或完整审计日志。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/services/serving.py" data-line-start="229" data-line-end="249" data-symbol="eval_sampling">backend/app/services/serving.py:229–249 · eval_sampling</a>
+            <a class="source-ref" href="../backend/app/pipelines/agent.py" data-line-start="315" data-line-end="358" data-symbol="ensure_obs_runtime">backend/app/pipelines/agent.py:315–358 · ensure_obs_runtime</a>
+            <a class="source-ref" href="../backend/app/services/observability.py" data-line-start="73" data-line-end="98" data-symbol="enable_transaction_search">backend/app/services/observability.py:73–98 · enable_transaction_search 的确认门禁</a>
+          </div>
+          <h3>9.4 删除台账、删除集群、停止本地：三件不同的事</h3>
+          <p><code>DELETE /api/runs/{run_id}</code> 拒绝 active Run，显式删除指标与 Run 行；没有清 FSx / S3 / RayJob 的代码。其他外键依赖仍可能影响删除。因此删除列表记录不是资源销毁操作。</p>
+          <p class="flow"><code>cluster.delete：workloads → nodegroups → runtimes → cluster</code></p>
+          <ol>
+            <li>workloads 先删命名空间中的 Services，让 LBC 有机会释放 NLB，再删 namespace；清理异常可仅记录后继续。</li>
+            <li>nodegroups 删除平台 managed nodegroups 并等待；新建集群路径另尝试清节点 role。</li>
+            <li>runtimes 删除台账关联的 AgentCore Runtime（含 _obs twin），用 context 记已删项；新建集群且有私有子网时等待 AgentCore ENI 释放，最多八小时。</li>
+            <li>cluster 对新建集群处理 SG 引用、尝试删除平台 SG，再删 CloudFormation stack；SG 等待超时可继续尝试 stack，之后再试剩余 SG。失败摘要不等于全部资源已清完。</li>
+          </ol>
+          <aside class="warning"><p><strong>导入集群 delete 也可能有云副作用：</strong>仅最后 stage 对 source!=create 跳过 stack 删除、写“only unregistering”；前面的 workloads / nodegroups / runtimes 仍会运行。不能把整个操作描述成“只注销本地记录”。本文没有调用任何删除 API，也未验证实际 ENI、NLB、SG 或账单清理效果。</p></aside>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="304" data-line-end="314" data-symbol="delete">backend/app/routers/runs.py:304–314 · delete Run 台账</a>
+            <a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="576" data-line-end="660" data-symbol="stage_delete_nodegroups / stage_delete_runtimes / stage_delete_workloads">backend/app/pipelines/cluster.py:576–660 · nodegroups / runtimes / workloads 删除</a>
+            <a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="663" data-line-end="769" data-symbol="stage_delete_cluster / _delete_platform_sgs / register">backend/app/pipelines/cluster.py:663–769 · cluster / SG 删除与注册顺序</a>
+            <a class="source-ref" href="../stop.sh" data-line-start="1" data-line-end="10" data-symbol="process-group stop loop">stop.sh:1–10 · 只停止本地进程组，与上述删除无替代关系</a>
+          </div>
+        </section>
+        <section id="safety-tests" aria-labelledby="safety-tests-title">
+          <h2 id="safety-tests-title"><span class="section-no">10</span> 安全、费用与测试边界</h2>
+          <p class="lead">费用和安全保护是<strong>有作用域、有前提的多层防线</strong>。下面分别列出代码实施的条件与没有证明的事情，避免把“有守卫”误读成“无需监控、不会超支”。</p>
+          <h3>10.1 四个费用层次，不是一个硬预算</h3>
+          <div class="table-wrap"><table>
+            <caption>保护层、执行位置与覆盖范围</caption>
+            <thead><tr><th scope="col">保护层</th><th scope="col">条件与局限</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">用户费用确认<br>API / UI</th><td>新 Run 必须 confirm_cost；HyperPod / EC2 池目标 count&gt;0 时要求确认，缩零不要求。Run resume 没有再次费用确认；Training Plan 购买的 confirm_upfront_fee 仅被返回，代码未拿它与实时 offering 价格比对。确认意图不是支付限额。<a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="163" data-line-end="196" data-symbol="create">backend/app/routers/runs.py:163–196 · create 费用门禁</a><a class="source-ref" href="../backend/app/routers/clusters.py" data-line-start="272" data-line-end="348" data-symbol="scale_group / apply_nodegroup">backend/app/routers/clusters.py:272–348 · scale_group / apply_nodegroup</a><a class="source-ref" href="../backend/app/routers/clusters.py" data-line-start="439" data-line-end="454" data-symbol="buy_training_plan">backend/app/routers/clusters.py:439–454 · buy_training_plan</a></td></tr>
+              <tr><th scope="row">Run budget<br>后端 monitor</th><td>有 budget_usd 时，估算达到阈值就尝试删 RayJob 并失败。_cost 首次调用只立时间基线，之后按轮询间隔×池内被计费实例数（最多所请求 nodes）×估计单价累积；查询实例数失败回退请求数。准备/首次容量等待及其他基础设施费用未被完整计入。后端离线不能及时执行该守卫。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="321" data-line-end="348" data-symbol="_cost">backend/app/pipelines/run.py:321–348 · _cost</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="416" data-symbol="stage_monitor">backend/app/pipelines/run.py:392–416 · monitor budget</a></td></tr>
+              <tr><th scope="row">RayJob deadline<br>Kubernetes / KubeRay</th><td>API max_hours 可空；有值时转换为 <code>int(max_hours × 3600)</code>，只有转换后的秒数 truthy 才写 activeDeadlineSeconds（极小正值截成 0 也不会写入）。这是<strong>每次 attempt 的 RayJob</strong>限制，不含整个 Run 准备/容量等待，也不限制所有重试累计时长。依赖集群控制器，并非无条件总时限。<a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="28" data-line-end="40" data-symbol="Compute">backend/app/routers/runs.py:28–40 · Compute.max_hours</a><a class="source-ref" href="../backend/app/services/runs.py" data-line-start="91" data-line-end="104" data-symbol="render">backend/app/services/runs.py:91–104 · render 转换秒数</a><a class="source-ref" href="../backend/app/render/train.py" data-line-start="525" data-line-end="526" data-symbol="rayjob">backend/app/render/train.py:525–526 · 条件写入 activeDeadlineSeconds</a></td></tr>
+              <tr><th scope="row">guardian<br>集群内独立 CronJob</th><td>每五分钟在 system CPU 节点执行，Forbid 并发；单次 guardian Job 的 240 秒 deadline 是它自身限制，不是训练时长限制。按配置池的闲置或累计估算预算尝试缩零，后端停机后仍可运行；依赖 K8s、AWS、S3、IRSA、节点及启动时安装 boto3 的网络/包可用性。<a class="source-ref" href="../backend/app/services/components.py" data-line-start="622" data-line-end="667" data-symbol="guardian_cronjob">backend/app/services/components.py:622–667 · guardian_cronjob</a></td></tr>
+            </tbody>
+          </table></div>
+          <h4>guardian 的“忙”“闲”“预算”具体是什么意思</h4>
+          <ul>
+            <li>扫描 tuningpad namespace 中 Pending / Running Pod，通过 nodeName 与 nodeSelector 映射池；卡住的 Pending 也算忙。忙时清 idle_since；首次看到有实例且空闲只开启计时，默认闲置 30 分钟后才缩零。</li>
+            <li>累计预算达到时，可以缩<strong>忙池</strong>，不是只在空闲时执行；managed=false 不缩零，target=0 跳过。EC2 仅在 ACTIVE / DEGRADED 时更新，否则留待下一轮。生成的配置排除 HyperPod system 池。</li>
+            <li>账本是采样节点数×经过时间×配置价格，不是 AWS Cost Explorer 或账单 API。未知价格可能为 0，Training Plan 运行费用记 0 不代表预付款免费；首次采样、定时运行和实际缩容有延迟。guardian 与 Run._cost 使用不同作用域/窗口，不应把两份数值当同一账单。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../cluster_assets/guardian.py" data-line-start="57" data-line-end="73" data-symbol="busy_groups">cluster_assets/guardian.py:57–73 · busy_groups</a>
+            <a class="source-ref" href="../cluster_assets/guardian.py" data-line-start="104" data-line-end="182" data-symbol="main">cluster_assets/guardian.py:104–182 · main 的账本、闲置与预算分支</a>
+            <a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="264" data-line-end="316" data-symbol="guardian_config_for">backend/app/pipelines/cluster.py:264–316 · guardian_config_for 的池与价格</a>
+          </div>
+          <aside class="warning"><p><strong>费用结论：</strong>人工确认、monitor budget、条件 deadline、guardian 与 finalize 清理各自能减少特定风险，但没有一个是全账户硬上限。后端失联、Pending 卡住、配置/权限/控制器失败、采样误差或基础设施残留都不能由“Job 已结束”排除。</p></aside>
+          <h3>10.2 认证、网络、身份与会话：配置事实，不是环境证明</h3>
+          <ul>
+            <li><strong>单 operator 认证：</strong>AuthMiddleware 检查 <code>/api/</code>。无密码只允许 loopback client；有密码时，除 health / auth 白名单外需要有效签名 Cookie。validate_startup 拒绝无密码 prod 或非 loopback host。不是多租户权限系统。</li>
+            <li><strong>Cookie 不等于 TLS：</strong>登录设置 HttpOnly、SameSite=Lax；Secure 取配置，默认 false。session_secret 未固定时按进程随机生成，重启后旧 session 失效。真实反向代理、转发地址信任和 HTTPS 暴露面仍需部署审查。</li>
+            <li><strong>SG 网络入口：</strong>添加 AgentCore SG → gateway 18765 / vLLM 8000，另有 AgentCore SG → NLB 8000 与 NLB SG → vLLM Pod 8000；推理 Service 标 internal。代码是添加限制来源的规则，<strong>不撤销环境中已有宽松规则</strong>，不能据此宣称真实账户绝无其他入口。</li>
+            <li><strong>IRSA：</strong>OIDC trust 限精确 namespace/service-account subject 和 STS audience；workload、guardian、LBC 角色分开。workload 可读写平台 bucket 并调用本区域本账户 runtime/*，不是每 Run 隔离；guardian 的缩容操作限定到指定集群/节点组；另有 S3 账本写入及受限 PassRole 权限，部分只读权限和 LBC policy 仍有 Resource:*，不宣称完全无通配的最小权限证明。</li>
+            <li><strong>registered sessions：</strong>agent_loop_yaml 固定 <code>require_registered_sessions=True</code>，模板 Agent 转发 rollout API key。这证明本仓库输出契约，不能冒充已经审计 toolkit 的拒绝机制、token 对齐或实际网络安全。</li>
+            <li><strong>日志与敏感值：</strong>HTTP 通用异常返回与后台 Job 错误日志不同；Job detail、第三方子进程输出和 traceback 可能入日志，没有中央脱敏器。本文只引用源码，不复制实际日志、账号、ARN、密钥、Cookie 或真实配置。</li>
+          </ul>
+          <div class="sources">
+            <a class="source-ref" href="../backend/app/core/auth.py" data-line-start="21" data-line-end="103" data-symbol="PUBLIC_PATHS / verify_token / AuthMiddleware / validate_startup">backend/app/core/auth.py:21–103 · Cookie 验证 / AuthMiddleware / validate_startup</a>
+            <a class="source-ref" href="../backend/app/core/config.py" data-line-start="49" data-line-end="95" data-symbol="Settings / secret">backend/app/core/config.py:49–95 · auth settings / secret</a>
+            <a class="source-ref" href="../backend/app/routers/auth.py" data-line-start="24" data-line-end="37" data-symbol="login">backend/app/routers/auth.py:24–37 · login Cookie 属性</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="114" data-line-end="238" data-symbol="irsa_trust / workload_policy / guardian_policy / ensure_irsa_roles">backend/app/services/components.py:114–238 · IRSA trust / policies / 独立角色</a>
+            <a class="source-ref" href="../backend/app/services/components.py" data-line-start="304" data-line-end="339" data-symbol="_allow / ensure_security_groups">backend/app/services/components.py:304–339 · _allow / ensure_security_groups</a>
+            <a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · registered sessions</a>
+            <a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="368" data-line-end="375" data-symbol="_run">backend/app/jobs/engine.py:368–375 · 后台 error detail / traceback</a>
+            <a class="source-ref" href="../backend/app/core/errors.py" data-line-start="60" data-line-end="90" data-symbol="register_error_handlers">backend/app/core/errors.py:60–90 · HTTP error handlers</a>
+          </div>
+          <h3>10.3 测试证明哪些分支，没有证明哪些云行为</h3>
+          <p><code>conftest._isolated</code> 为每个测试使用临时数据目录、SQLite 与不存在的配置文件，重置 settings，安装拒绝意外 AWS/K8s 访问的工厂；client 用 start_background=False。StubClient 显式给出响应并记录调用。这阻断<strong>经工厂</strong>的访问，不是全局网络沙箱；独立 SDK、HTTP 和子进程仍须 stub，例如 guardian 测试单独替换 boto3.client 与 k8s 函数。</p>
+          <div class="sources">
+            <a class="source-ref" href="../backend/tests/conftest.py" data-line-start="11" data-line-end="84" data-symbol="_NoAws / _isolated / client / StubClient">backend/tests/conftest.py:11–84 · 工厂隔离 / client / StubClient</a>
+            <a class="source-ref" href="../backend/tests/test_guardian.py" data-line-start="65" data-line-end="90" data-symbol="_run">backend/tests/test_guardian.py:65–90 · guardian 独立 I/O stub</a>
+          </div>
+          <div class="table-wrap"><table>
+            <caption>代表性测试源码：这里描述断言范围，不报告本页作者已执行这些测试</caption>
+            <thead><tr><th scope="col">主题</th><th scope="col">可定位的断言</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">引擎顺序 / 恢复 / 取消</th><td>阶段顺序与 context、失败 retry 跳过成功阶段、sleep 协作取消、running Job 恢复、超时和字节游标。不是跨进程 exactly-once 或所有取消竞态的测试。<a class="source-ref" href="../backend/tests/test_engine.py" data-line-start="22" data-line-end="114" data-symbol="test_stages_run_in_order_and_persist_context / test_resume_pending_reruns_running_jobs">backend/tests/test_engine.py:22–114 · test_stages_run_in_order_and_persist_context 等</a></td></tr>
+              <tr><th scope="row">规划 / 配置</th><td>策略选择、TP/CP/EP、warnings、registered sessions 与指定 RayJob deadline 字段；不是实机显存或运行时拦截证明。<a class="source-ref" href="../backend/tests/test_planner.py" data-line-start="7" data-line-end="64" data-symbol="test_plan_table">backend/tests/test_planner.py:7–64 · test_plan_table 等</a><a class="source-ref" href="../backend/tests/test_runs.py" data-line-start="193" data-line-end="205" data-symbol="test_agent_loop_yaml_forces_registered_sessions">backend/tests/test_runs.py:193–205 · test_agent_loop_yaml_forces_registered_sessions</a><a class="source-ref" href="../backend/tests/test_runs.py" data-line-start="319" data-line-end="338" data-symbol="activeDeadlineSeconds assertion">backend/tests/test_runs.py:319–338 · 多节点 RayJob / activeDeadlineSeconds 断言</a></td></tr>
+              <tr><th scope="row">Run 与 guardian 守卫</th><td>Run 成功/有限重试/预算/guard 不重试，以及同池判闲；guardian 的 busy、Pending、首次闲置计时、超时缩零及预算缩忙池均用 stub 断言。<a class="source-ref" href="../backend/tests/test_runs.py" data-line-start="504" data-line-end="575" data-symbol="test_run_happy_path / test_run_budget_stop / test_rollout_failure_guard_fails_the_run_without_retry">backend/tests/test_runs.py:504–575 · happy path / budget / rollout guard</a><a class="source-ref" href="../backend/tests/test_runs.py" data-line-start="656" data-line-end="687" data-symbol="test_scale_down_ignores_runs_on_other_pools">backend/tests/test_runs.py:656–687 · test_scale_down_ignores_runs_on_other_pools</a><a class="source-ref" href="../backend/tests/test_guardian.py" data-line-start="103" data-line-end="145" data-symbol="test_busy_group_is_left_alone / test_budget_scales_even_busy_groups">backend/tests/test_guardian.py:103–145 · busy / idle / budget 测试组</a></td></tr>
+              <tr><th scope="row">认证 / 网络策略</th><td>密码登录、无密码拒绝非回环、启动 guard、SG 入站参数与 IRSA subject 等。断言的是代码构造/响应，不代表真实账户策略评估已通过。<a class="source-ref" href="../backend/tests/test_core.py" data-line-start="12" data-line-end="47" data-symbol="test_password_flow / test_startup_guard">backend/tests/test_core.py:12–47 · test_password_flow / test_startup_guard 等</a><a class="source-ref" href="../backend/tests/test_cluster.py" data-line-start="121" data-line-end="193" data-symbol="test_security_groups_rules_are_idempotent / test_irsa_trust_scoped_to_service_account">backend/tests/test_cluster.py:121–193 · SG / IRSA / guardian policy 断言</a></td></tr>
+            </tbody>
+          </table></div>
+          <p>仓库质量门禁是 <code>make verify</code>：Ruff check/format、pytest -n auto、start.py / stop.sh 及 cluster/trainer/template shell 语法、ESLint、TypeScript + Vite build、i18n en/zh-CN key parity。只有 i18n_check 的可选 <code>--strict</code> 才额外扫描硬编码文字/静态 key。frontend/package.json 没有 test 脚本或前端测试框架；构建通过不等于浏览器/E2E 通过。静态 HTML 也不在 Vite 页面流程中，须另查结构、引用、离线、窄屏与打印。</p>
+          <div class="sources">
+            <a class="source-ref" href="../scripts/verify.sh" data-line-start="12" data-line-end="34" data-symbol="quality gate">scripts/verify.sh:12–34 · make verify 实际分节</a>
+            <a class="source-ref" href="../scripts/i18n_check.py" data-line-start="161" data-line-end="167" data-symbol="--strict">scripts/i18n_check.py:161–167 · --strict 开关</a>
+            <a class="source-ref" href="../frontend/package.json" data-line-start="6" data-line-end="34" data-symbol="scripts / dependencies">frontend/package.json:6–34 · scripts / dependencies</a>
+          </div>
+          <aside class="boundary"><p><strong>验证边界：</strong>本页是源码解释，不是部署或测试通过证书。真实 AWS/K8s、IAM/SG 生效、GPU/EFA/镜像运行、价格/账单、模型收益、取消竞态与清理效果均未由本页验证；toolkit/verl 内部和远程模板供应链未审计。文档的结构检查也不能替代上述验证，更不能据此启动任何计费操作。</p></aside>
+        </section>
+        <section id="source-map" aria-labelledby="source-map-title">
+          <h2 id="source-map-title"><span class="section-no">11</span> 源码地图与术语</h2>
+          <p class="lead">按问题进入源码，比从目录第一行顺读更有效。下面是最短阅读路线；章节中的就近引用保留更细分支。所有链接都是本仓库文件，行号只对应首页快照，不是可执行操作。</p>
+          <div class="table-wrap"><table>
+            <caption>问题 → 第一入口 → 下一跳</caption>
+            <thead><tr><th scope="col">想回答的问题</th><th scope="col">阅读入口与延伸</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">一次点击如何变成长任务？</th><td>Run create 校验/提交，再读引擎 start/_run 与 pipeline 注册；从第 4、7 章反查状态。<a class="source-ref" href="../backend/app/routers/runs.py" data-line-start="163" data-line-end="196" data-symbol="create">backend/app/routers/runs.py:163–196 · create</a><a class="source-ref" href="../backend/app/jobs/engine.py" data-line-start="181" data-line-end="217" data-symbol="start">backend/app/jobs/engine.py:181–217 · start</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="545" data-line-end="555" data-symbol="register">backend/app/pipelines/run.py:545–555 · run.train 注册</a></td></tr>
+              <tr><th scope="row">台账与进度存在哪里？</th><td>看 Run / Job，再看 session / JSON 赋值规则；不要把 target_id 当外键或把工作空间字段当租户隔离。<a class="source-ref" href="../backend/app/models.py" data-line-start="118" data-line-end="218" data-symbol="Run / RunMetric / Export / InferenceEndpoint / Eval / Job">backend/app/models.py:118–218 · Run 至 Job</a><a class="source-ref" href="../backend/app/core/db.py" data-line-start="44" data-line-end="109" data-symbol="init_db / session_scope">backend/app/core/db.py:44–109 · 初始化 / schema / session_scope</a></td></tr>
+              <tr><th scope="row">为何选这种策略、参数最终是什么？</th><td>先 plan，再 merge_params / overrides / agent_loop_yaml，最后 render 装配实际 Run。<a class="source-ref" href="../backend/app/planner.py" data-line-start="63" data-line-end="183" data-symbol="plan">backend/app/planner.py:63–183 · plan</a><a class="source-ref" href="../backend/app/render/train.py" data-line-start="112" data-line-end="305" data-symbol="merge_params / overrides / agent_loop_yaml">backend/app/render/train.py:112–305 · 参数到 Hydra / YAML</a><a class="source-ref" href="../backend/app/services/runs.py" data-line-start="30" data-line-end="108" data-symbol="render">backend/app/services/runs.py:30–108 · render</a></td></tr>
+              <tr><th scope="row">Agent 怎样使用训练中的模型？</th><td>模板的 _rollout 模型客户端是本仓库可见入口；再看 loop YAML。toolkit 内部不在本页链接/审计范围。<a class="source-ref" href="../templates/gsm8k_math/agent/rl_app.py" data-line-start="32" data-line-end="61" data-symbol="invoke_agent">templates/gsm8k_math/agent/rl_app.py:32–61 · invoke_agent</a><a class="source-ref" href="../backend/app/render/train.py" data-line-start="276" data-line-end="305" data-symbol="agent_loop_yaml">backend/app/render/train.py:276–305 · AgentCoreAgentLoop 配置</a></td></tr>
+              <tr><th scope="row">为什么 UI 还显示旧值 / 为什么默认值没提交？</th><td>useLoad 的旧快照保留、useJob 的转换回调，与向导 defaults / explicit params 是三件事。<a class="source-ref" href="../frontend/src/v2/hooks.ts" data-line-start="38" data-line-end="64" data-symbol="useLoad">frontend/src/v2/hooks.ts:38–64 · useLoad</a><a class="source-ref" href="../frontend/src/lib/useJob.ts" data-line-start="9" data-line-end="35" data-symbol="useJob">frontend/src/lib/useJob.ts:9–35 · useJob</a><a class="source-ref" href="../frontend/src/pages/Runs.tsx" data-line-start="157" data-line-end="214" data-symbol="RunWizard">frontend/src/pages/Runs.tsx:157–214 · defaults / body / submit</a></td></tr>
+              <tr><th scope="row">曲线、日志、checkpoint 为何不同步？</th><td>S3 周期同步 → 日志分页解析 → Metric / cursor 分开提交 → UI 轮询；索引不是 checkpoint 数据。<a class="source-ref" href="../backend/app/render/train.py" data-line-start="344" data-line-end="357" data-symbol="sync_progress">backend/app/render/train.py:344–357 · sync_progress</a><a class="source-ref" href="../backend/app/metrics/verl_log.py" data-line-start="40" data-line-end="68" data-symbol="parse_line / parse_chunk">backend/app/metrics/verl_log.py:40–68 · parse_line / parse_chunk</a><a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="300" data-line-end="318" data-symbol="_ingest_metrics">backend/app/pipelines/run.py:300–318 · _ingest_metrics</a></td></tr>
+              <tr><th scope="row">失败后会不会重试、释放资源？</th><td>看 monitor / finalize / finish hook，再对照 guardian 和 cluster.delete；没有一个统一全资源清理线程。<a class="source-ref" href="../backend/app/pipelines/run.py" data-line-start="392" data-line-end="542" data-symbol="stage_monitor / stage_finalize / _finished">backend/app/pipelines/run.py:392–542 · monitor 至 _finished</a><a class="source-ref" href="../cluster_assets/guardian.py" data-line-start="104" data-line-end="182" data-symbol="main">cluster_assets/guardian.py:104–182 · main</a><a class="source-ref" href="../backend/app/pipelines/cluster.py" data-line-start="761" data-line-end="769" data-symbol="cluster.delete">backend/app/pipelines/cluster.py:761–769 · cluster.delete 顺序</a></td></tr>
+              <tr><th scope="row">训练后的模型怎样导出、服务、评测？</th><td>merge 读取 FSx，deploy 建 vLLM/NLB，eval 用 RolloutClient；三个独立 pipeline，非自动扩容。<a class="source-ref" href="../backend/app/pipelines/serving.py" data-line-start="40" data-line-end="183" data-symbol="stage_merge / stage_deploy_endpoint">backend/app/pipelines/serving.py:40–183 · merge / deploy / delete</a><a class="source-ref" href="../backend/app/pipelines/serving.py" data-line-start="198" data-line-end="317" data-symbol="stage_eval / stage_eval_observability">backend/app/pipelines/serving.py:198–317 · evaluate / observability</a></td></tr>
+              <tr><th scope="row">非控制台入口、构建与模板在哪里？</th><td>启动脚本只管进程；公开配置只是示例；镜像与模板属于不同构建链。更多准备分支见第 5 章。<a class="source-ref" href="../start.py" data-line-start="58" data-line-end="95" data-symbol="main">start.py:58–95 · main</a><a class="source-ref" href="../stop.sh" data-line-start="1" data-line-end="10" data-symbol="stop loop">stop.sh:1–10 · stop loop</a><a class="source-ref" href="../Makefile" data-line-start="1" data-line-end="20" data-symbol="targets">Makefile:1–20 · targets</a><a class="source-ref" href="../trainer_image/Dockerfile" data-line-start="1" data-line-end="45" data-symbol="PROFILE / uv sync">trainer_image/Dockerfile:1–45 · PROFILE / frozen 依赖</a><a class="source-ref" href="../templates/gsm8k_math/template.yaml" data-line-start="1" data-line-end="44" data-symbol="agent_loop / presets">templates/gsm8k_math/template.yaml:1–44 · agent_loop / presets</a><a class="source-ref" href="../config/tuningpad.example.yaml" data-line-start="1" data-line-end="7" data-symbol="example settings">config/tuningpad.example.yaml:1–7 · 公开示例</a><a class="source-ref" href="../backend/pyproject.toml" data-line-start="32" data-line-end="35" data-symbol="tool.uv.sources">backend/pyproject.toml:32–35 · sibling toolkit 接入声明</a></td></tr>
+              <tr><th scope="row">什么是测试证据，什么仍要部署验证？</th><td>先读 fixture 的边界，再读具体断言和规范门禁，不把历史 verified 注释当本次执行结果。<a class="source-ref" href="../backend/tests/conftest.py" data-line-start="16" data-line-end="84" data-symbol="_isolated / StubClient">backend/tests/conftest.py:16–84 · _isolated / StubClient</a><a class="source-ref" href="../scripts/verify.sh" data-line-start="12" data-line-end="34" data-symbol="quality gate">scripts/verify.sh:12–34 · quality gate</a><a class="source-ref" href="../cluster_assets/lbc_iam_policy.json" data-line-start="1" data-line-end="32" data-symbol="Statement">cluster_assets/lbc_iam_policy.json:1–32 · 固定 IAM 输入资产示例</a></td></tr>
+            </tbody>
+          </table></div>
+          <h3>11.1 术语速查</h3>
+          <p>以下是本文用语的阅读释义；具体实现和限制以对应章节引用为准，不扩展为 toolkit 算法细节或 AWS 保证。</p>
+          <dl class="glossary">
+            <dt>控制面 / 训练面</dt><dd>控制面接受意图、编排和观测；训练面在 GPU/Ray/verl 与 AgentCore 之间执行训练、采样和模型调用。详见 <a href="#overview">系统总览</a>。</dd>
+            <dt>Run / Job / stage / attempt</dt><dd>Run 是训练业务；Job 是一次 pipeline 执行；stage 是 Job 的一个持久化步骤；attempt 是一次外部 RayJob 提交轮次，不是重试 Job 的新 ID。详见 <a href="#job-engine">状态轨道</a>。</dd>
+            <dt>台账 / 幂等 / reconciliation</dt><dd>台账保存意图与最近观测；幂等是重跑时先查真实状态、避免重复副作用的约定，不是 exactly-once；reconciliation 指持续比较意图与实际状态，本仓库只有未注册回调的引擎框架，不能称全局同步已启用。</dd>
+            <dt>GRPO / rollout</dt><dd>GRPO 是本仓库选择的组相对策略优化算法名；rollout 是 Agent 对样本的一次采样轨迹，可包含多轮模型/工具调用。本文只解释其 <a href="#training-flow">接入与观测链</a>，不证明算法收敛或收益。</dd>
+            <dt>FSDP / Megatron / full / LoRA</dt><dd>前两者是训练后端/并行配置路线，后两者表示全参数或低秩适配器微调；它们组合成 strategy。参见 <a href="#planning">规划启发式</a>，不是四个互斥算法。</dd>
+            <dt>TP / CP / EP / HBM / offload</dt><dd>张量并行 / 上下文并行 / 专家并行；HBM 指 GPU 高带宽显存；offload 指把部分训练状态移到 CPU 等内存。rollout_tp 单独服务推理并行，不自动等于训练 TP。</dd>
+            <dt>gateway / vLLM / registered sessions</dt><dd>gateway 是 Agent 模型请求回连的训练侧入口；vLLM 提供模型推理。registered sessions 是只接受预注册会话的输出配置契约，实际实现位于外部 toolkit。不是 FastAPI webhook。</dd>
+            <dt>EFA / IRSA / SG / ENI / LBC</dt><dd>EFA 是实例间高性能网络能力；IRSA 将 K8s ServiceAccount 与 IAM 身份关联；SG 是安全组，ENI 是网络接口；LBC 是 AWS Load Balancer Controller。配置声明不能替代真实连通性/权限验证。</dd>
+            <dt>checkpoint / index / export</dt><dd>checkpoint 数据在 FSx；S3 index 仅列可见 step；export 才执行模型合并并同步 S3。模型 export 不等于可恢复训练全状态，checkpoint 也不保证永不轮转。</dd>
+            <dt>guardian / deadline / budget</dt><dd>guardian 是独立集群 CronJob；deadline 是有配置才写入的单 RayJob 限时；budget 是轮询估算守卫。它们作用域不同，都不是全账户硬账单上限，详见 <a href="#safety-tests">费用防线</a>。</dd>
+            <dt>draft / server snapshot / URL state</dt><dd>draft 是本地未提交编辑；snapshot 是某个 hook 最近取得的数据；URL state 标识页面/资源/tab。轮询和 reload 不构成共享缓存或自动全局失效，详见 <a href="#frontend-flow">前端数据流</a>。</dd>
+          </dl>
+          <h3>11.2 如何使用源码引用与维护本页</h3>
+          <p>源码链接的可见标签按“<code>路径:起始–结束 · 符号</code>”书写；href 仅指向相对文件，不附 GitHub 式跳行片段。class=source-ref 与数字 data-line-start / data-line-end 供静态校验，能证明范围可定位，不能自动证明文字解释正确。行号漂移时先找符号，再重新检查整个条件分支和调用者。</p>
+          <p>独立复制本 HTML 后，正文、目录、表格、内嵌图和等价文字仍全部静态存在；源码导航则需要保留仓库相对布局。打开源码可能显示文本，也可能触发浏览器下载，这是本地文件处理行为，不是文档缺失在线服务。本页没有脚本、远程字体、外部图表库、遥测或自动 API 请求。</p>
+          <aside class="note"><p><strong>最后的阅读准则：</strong>把“字段已配置”“测试断言存在”“真实云端生效”“训练质量提升”分成四个问题。遇到不一致，回到此快照的实际源码与最新观测，不用研究稿、图上的简写或成功标签替代证据。</p></aside>
+        </section>
+      </article>
+    </main>
+  </div>
+  <footer class="page-footer">
+    <p><strong>TuningPad · 中文核心逻辑导读</strong> — 以首页 commit 为源码边界，正文与图表均可离线阅读。源码文件链接依赖仓库相对布局；本页不执行请求、安装、部署或清理操作。</p>
+    <p>阅读终点不是“系统已被证明安全可用”：源码解释、测试执行、浏览器验收与真实云部署验证应分别记录。本文不作为账单、资源清理、模型效果或 toolkit 内部行为的保证。 <a href="#top">返回顶部 ↑</a></p>
+  </footer>
+</body>
+</html>
