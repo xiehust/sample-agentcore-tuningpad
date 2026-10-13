@@ -260,3 +260,25 @@ The user approved updating associated OfficeBench AgentCore runtimes and checkin
 ### Status and Next Steps
 
 Parent AC4 (image adoption and safety verification) is complete. Old model smoke results remain historical under `last_smoke.previous`; current validation is `ready_only`, not a new model/quality result. Rollout failure-policy AC5, other real-training validations and resource-retention decisions remain open and need their own approvals.
+
+
+## Session 9: Finish Chinese core-logic HTML guide
+<!-- trellis-session: v=2 fp=db63566532e12b34 -->
+
+**Date**: 2026-10-13
+**Task**: Finish Chinese core-logic HTML guide
+**Branch**: `main`
+
+### Summary
+
+Committed docs/core-logic.zh-CN.html (sha256 aae50cd6…). A1/A2 independent source review, A3 static structure checks and A5 make verify PASS were already recorded. This session added partial A4: agent-browser still hangs; Playwright bundled Chromium (temporary /tmp config, file access enabled) opened file:// at 1440x900 with 0 console errors, no external requests, 11 sections/5 SVGs/14 tables rendered, no horizontal overflow. Narrow-screen, print and click-through checks not done; user asked to wrap up. No business/dependency changes; spec unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3402e16` | docs: add Chinese core-logic source guide |
+
+### Status
+
+[OK] **Completed**

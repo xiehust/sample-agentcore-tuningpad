@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-10-10
+- **Total Sessions**: 9
+- **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~262 | Active |
+| `journal-1.md` | ~284 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-10-13 | Finish Chinese core-logic HTML guide | `3402e16` | `main` |
 | 8 | 2026-10-10 | Adopt OfficeBench images without model invocation | Runtime deployment record in task | `main` |
 | 7 | 2026-10-10 | Authorized image refresh and AWS inventory | Operation record in task | `main` |
 | 6 | 2026-10-10 | Isolate toolkit rollout entrypoint tests | toolkit `99ab5d7` | `main`; toolkit `fix/rollout-test-isolation` |
