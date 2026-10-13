@@ -39,6 +39,6 @@
 
 用户最终确认继续后已实施。仅一个测试文件变化；目标及相邻 client 离线回归均通过，详见 `verification.md`。
 
-toolkit 提交 `99ab5d7` 已推送到 `fix/rollout-test-isolation`，尚未合入 toolkit `main`。任务保留 `in_progress` 等待合并收尾，AC1–AC4 已通过；不要把修复分支已验证写成主分支已修复。
+toolkit 提交 `99ab5d7` 经 PR #4 于 2026-10-13 合入 toolkit `main`（merge commit `123e297`）。合并前在最新 main `40ee401` 上本地合并验证：无 AWS 凭证下目标 21 个测试、全量 515 passed/20 skipped，pinned ruff 0.1.5 通过。AC1–AC4 已通过，任务完成。
 
 未运行可能主动联网的完整 toolkit 集成套件，没有生产代码、依赖或云资源变更。
