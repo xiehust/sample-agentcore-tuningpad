@@ -1,0 +1,10 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep source resolution in services, thin routers and registered pipeline boundaries; existing sibling text is current-state evidence to update after approval."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Pinned uv dependencies, hermetic Git/cloud stubs, canonical verification and safety guardrails."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Stable AppError envelope, persisted Job.error_code and both locale keys for toolkit failures."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Use existing TrainerImage.toolkit_sha for the full revision; short sessions; no schema, queue payload or recovery-policy changes."}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Interruptible stage idempotency and unchanged cost/network protections; no live cloud validation."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Bounded safe Git diagnostics and callback/job log handling without leaking secrets."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Central Meta/Check DTOs and localized errors; no direct fetch or new dependency."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Locale parity/strict checks and mock-only bilingual diagnostics QA."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"One pyproject Git source across installation and source consumers; reuse existing DTOs and avoid expanding task lifecycle scope."}
+{"file":".trellis/tasks/10-11-toolkit-git-source/research.md","reason":"Preserved source evidence and uv/PyPA references; current scope corrections supersede earlier offline, provenance and recovery proposals."}

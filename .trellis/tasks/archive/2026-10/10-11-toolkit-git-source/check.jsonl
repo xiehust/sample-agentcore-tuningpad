@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review exact dependency pins, hermetic tests and final make verify without cloud actions."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify HTTP/Job error contracts, bounded diagnostics, en/zh-CN coverage and no silent recovery."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify full SHA in the existing TrainerImage field and expected revision at packaging; preserve queries, payloads, recovery rules and schema."}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Check restart/idempotency and preserve auth, network and GPU cost protections."}
+{"file":".trellis/spec/backend/agentcore-image-updates.md","reason":"Do not confuse local source/recipe change with authorized image deployment or validated runtime adoption."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Preserve Meta/Check shapes and statuses; only necessary display/type adjustments, no new public source DTO or Settings state machine."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify locale key use and mock-only UI checks, no new frontend test dependencies."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Ensure pyproject remains the only editable URL/SHA authority and consumers do not duplicate source parsing."}
+{"file":".trellis/tasks/10-11-toolkit-git-source/research.md","reason":"Review preserved consumer/uv/symlink evidence under the corrected minimal scope; withdrawn offline, composite identity and recovery designs are non-goals."}
