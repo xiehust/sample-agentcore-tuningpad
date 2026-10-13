@@ -14,3 +14,7 @@ dist/
 /config/tuningpad.yaml
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+# Local tooling state (CodeGraph index, Playwright CLI skill/output)
+/.codegraph/
+/.playwright/
+/.claude/skills/playwright-cli/

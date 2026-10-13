@@ -9,7 +9,7 @@
 - 2026-10-10：用户先同意建立收尾任务，随后确认首批范围为“TuningPad 的错误提示本地化和记录同步”；暂不修改 toolkit、不做云端操作。
 - 首批只覆盖 R1a、R4a、R4b，由本任务直接承载；其余需求仍为后续跟踪，不因首批完成而关闭。首批设计和执行计划见 `design.md`、`implement.md`。
 - 用户已最终确认首批方案，并要求改用 Playwright CLI 验收。首批 B1–B4 已完成。随后用户明确要求 commit/push 并继续其余事项；首批提交 `8889a98` 已推送至 `origin/main`。
-- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），尚未合入 main；证据见 `../10-10-toolkit-test-isolation/verification.md`。随后用户明确授权 AWS 只读盘点与镜像构建：OfficeBench 两区发布和 us-east-1 FSDP 构建已完成，详见 `build-operations.md`。用户再批准镜像级运行时更新与 READY 检查后，4 个 OfficeBench runtime 及 DEFAULT 均已达到版本 2 / READY，配置和标签未变，详见 `runtime-deployment.md`。未调用模型、扩容 GPU、训练或删除；其他缺口见 `remaining-evidence.md`。
+- 整个跟踪任务保持 `in_progress`。R1b 的单文件测试隔离修复已通过验收并推送 toolkit 分支 `fix/rollout-test-isolation`（`99ab5d7`），2026-10-13 经 PR #4 合入 main（`123e297`），子任务已归档；证据见 `../10-10-toolkit-test-isolation/verification.md`。随后用户明确授权 AWS 只读盘点与镜像构建：OfficeBench 两区发布和 us-east-1 FSDP 构建已完成，详见 `build-operations.md`。用户再批准镜像级运行时更新与 READY 检查后，4 个 OfficeBench runtime 及 DEFAULT 均已达到版本 2 / READY，配置和标签未变，详见 `runtime-deployment.md`。未调用模型、扩容 GPU、训练或删除；其他缺口见 `remaining-evidence.md`。
 - 原任务 `../10-10-rollout-failure-policy/prd.md` 继续拥有失败策略的 AC1–AC5；本任务引用其结果，不重复执行或提前归档。
 
 ## Requirements
@@ -17,7 +17,7 @@
 ### R1 本地工程缺口
 
 - **R1a 错误提示本地化**：补齐 `run.rollout_failure_guard` 的中英文说明，并核对实际 JobPanel 展示路径，而不只添加未被使用的 locale key。审计时证据：`backend/app/pipelines/run.py:425`、`frontend/src/components/JobPanel.tsx:129`；当时两种 `common.json` 均缺少该 key。依据 `.trellis/spec/backend/error-handling.md`，新增用户可见错误码须有翻译。首批已补齐并在真实组件的本地 mock 场景验证，详见 `verification.md`。
-- **R1b toolkit 测试隔离（修复分支已验证，待合并）**：`tests/test_rollout_entrypoint.py` 已在 app 构造前 mock S3，并等待和断言后台保存。75 个相关测试通过，Python/AWS 验证器记录为零违规；生产代码和依赖未改。提交 `99ab5d7` 已推送 toolkit 独立分支，但主分支尚未包含修复；详见子任务验收记录。
+- **R1b toolkit 测试隔离（已合入 main）**：`tests/test_rollout_entrypoint.py` 已在 app 构造前 mock S3，并等待和断言后台保存。75 个相关测试通过，Python/AWS 验证器记录为零违规；生产代码和依赖未改。提交 `99ab5d7` 经 PR #4 合入 toolkit main（`123e297`），合并前在最新 main 上全量 515 passed/20 skipped；详见子任务验收记录。
 
 ### R2 当前功能的部署与真实验收
 

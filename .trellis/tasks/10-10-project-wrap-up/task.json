@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-10：首批与R1b修复已验证（toolkit分支99ab5d7待合并）。OfficeBench镜像两区发布、us-east-1 FSDP镜像ready；用户再授权部署后，4个OfficeBench runtime及DEFAULT均为版本2/READY，配置与标签未变。父AC4完成；AC3/AC5/AC6及原失败策略AC5仍开放。未调用模型、扩容GPU、训练或删建运行时；详见build-operations.md与runtime-deployment.md。",
+  "notes": "2026-10-10：首批与R1b修复已验证（toolkit 99ab5d7 已于2026-10-13经PR #4合入main 123e297，子任务归档）。OfficeBench镜像两区发布、us-east-1 FSDP镜像ready；用户再授权部署后，4个OfficeBench runtime及DEFAULT均为版本2/READY，配置与标签未变。父AC4完成；AC3/AC5/AC6及原失败策略AC5仍开放。未调用模型、扩容GPU、训练或删建运行时；详见build-operations.md与runtime-deployment.md。",
   "meta": {}
 }
