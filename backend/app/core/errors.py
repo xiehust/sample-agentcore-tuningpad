@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -76,8 +77,11 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _validation(_: Request, exc: RequestValidationError):
         from fastapi.encoders import jsonable_encoder
 
-        # errors() may carry the raised exception in `ctx` (model validators): stringify it
-        detail = jsonable_encoder(exc.errors(), custom_encoder={Exception: str})
+        # Validators may carry exceptions in ctx and overflowing JSON numbers in input.
+        detail = jsonable_encoder(
+            exc.errors(),
+            custom_encoder={Exception: str, float: lambda v: v if math.isfinite(v) else str(v)},
+        )
         return _envelope(422, "request.invalid", "request validation failed", detail)
 
     @app.exception_handler(StarletteHTTPException)

@@ -811,3 +811,580 @@ def test_run_resumes_after_node_replacement(run_env):
     with session_scope() as s:
         r = s.get(Run, "run-1")
         assert r.status == "succeeded" and r.retries == 1
+
+
+# ---------------- training-mode contracts (hermetic, not actual verl/GPU) ----------------
+
+MODES = ["sync", "colocate_async"]
+INVALID_MODES = [None, "", "separate_async", "unknown", 0, 1, True, [], {}]
+
+
+def _mode_render(run, attempt=0):
+    return rsvc.render(
+        run,
+        cluster={"region": "us-east-1"},
+        runtime_arn="arn:rt",
+        bucket="b",
+        image="img",
+        template_loop={},
+        datasets={"train": "s3://b/train"},
+        attempt=attempt,
+    )
+
+
+def _stored_mode(mode):
+    with session_scope() as s:
+        row = s.get(Run, "run-1")
+        row.spec = {**row.spec, "training_mode": mode}
+        row.compute = {**row.compute, "max_hours": 1}
+
+
+@pytest.fixture
+def mode_request(run_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.routers import runs as rr
+
+    # HF_HUB_OFFLINE alone is not a network sandbox: explicitly stub discovery.
+    monkeypatch.setattr(
+        rr.models,
+        "check_model",
+        lambda mid: SimpleNamespace(
+            compatible=True, params_b=2.27, is_moe=False, to_dict=lambda: {"model_id": mid}
+        ),
+    )
+    # Keep actual Run/Job persistence, but no pipeline work in API contract tests.
+    monkeypatch.setattr(eng.get_engine()._pool, "submit", lambda *a, **k: None)
+    return {
+        "name": "mode-test",
+        "agent_runtime_id": "rt-1",
+        "train_dataset_id": "ds-1",
+        "model_id": "Qwen/Qwen3.5-2B",
+        "confirm_cost": True,
+        "compute": {
+            "instance_group": "gpu",
+            "instance_type": "p5.4xlarge",
+            "nodes": 1,
+            "max_hours": 1,
+        },
+    }
+
+
+def _assert_mode_rejected(client, body, code, run_env):
+    with session_scope() as s:
+        counts = (s.query(Run).count(), s.query(Job).count())
+    for endpoint in ("/api/runs/preview", "/api/runs"):
+        response = client.post(endpoint, json=body)
+        assert response.status_code == (422 if code == "request.invalid" else 400), response.text
+        assert response.json()["code"] == code
+    with session_scope() as s:
+        assert (s.query(Run).count(), s.query(Job).count()) == counts
+    assert run_env["hp"]["current"] == 0
+    assert not run_env["applied"]
+
+
+@pytest.mark.parametrize("mode", ["omitted", *MODES])
+def test_mode_api_persistence_round_trip(client, mode_request, mode):
+    from app.pipelines.run import load_run
+
+    if mode != "omitted":
+        mode_request["training_mode"] = mode
+    expected = "sync" if mode == "omitted" else mode
+    preview = client.post("/api/runs/preview", json=mode_request)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["training_mode"] == expected
+    created = client.post("/api/runs", json=mode_request)
+    assert created.status_code == 200, created.text
+    rid, jid = created.json()["id"], created.json()["job_id"]
+    # Reopen DB, then traverse the public detail endpoint and real renderer.
+    with session_scope() as s:
+        row = s.get(Run, rid)
+        assert row.spec["training_mode"] == expected
+        assert s.get(Job, jid).target_id == rid
+    assert client.get(f"/api/runs/{rid}").json()["spec"]["training_mode"] == expected
+    assert f"trainer.v1.trainer_mode=agentcore_{expected}" in _mode_render(load_run(rid))["hydra"]
+
+
+@pytest.mark.parametrize("mode", INVALID_MODES)
+def test_invalid_mode_requests_have_no_side_effects(client, mode_request, run_env, mode):
+    mode_request["training_mode"] = mode
+    _assert_mode_rejected(client, mode_request, "request.invalid", run_env)
+
+
+@pytest.mark.parametrize("container", ["params", "plan_overrides"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "training_mode",
+        "trainer_mode",
+        "trainer.v1.trainer_mode",
+        "+trainer.v1.colocate_async.parameter_sync_step",
+    ],
+)
+def test_mode_and_hydra_injection_rejected(client, mode_request, run_env, container, key):
+    mode_request[container] = {key: "colocate_async"}
+    code = "run.unknown_param" if container == "params" else "run.bad_plan_override"
+    _assert_mode_rejected(client, mode_request, code, run_env)
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"profile": "megatron"},
+        {"strategy": "megatron_lora"},
+        {"profile": None},
+        {"profile": []},
+        {"strategy": {}},
+        {"strategy": "fsdp_bad"},
+    ],
+)
+def test_final_plan_pair_is_checked(client, mode_request, run_env, mode, override):
+    mode_request.update(training_mode=mode, plan_overrides=override)
+    _assert_mode_rejected(client, mode_request, "run.bad_plan_override", run_env)
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("key", ["train_batch_size", "ppo_mini_batch_size"])
+@pytest.mark.parametrize("value", [0, -1, 0.5, 8.0, True, False, "8", [], {}])
+def test_batch_strict_integers_at_api(client, mode_request, run_env, mode, key, value):
+    mode_request.update(training_mode=mode, params={key: value})
+    _assert_mode_rejected(client, mode_request, "run.invalid_batch", run_env)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_indivisible_batch_at_api(client, mode_request, run_env, mode):
+    mode_request.update(
+        training_mode=mode, params={"train_batch_size": 8, "ppo_mini_batch_size": 3}
+    )
+    _assert_mode_rejected(client, mode_request, "run.invalid_batch", run_env)
+
+
+@pytest.mark.parametrize(
+    "hours", ["omitted", None, 0, -1, 1 / 7200, 721, "NaN", "Infinity", "-Infinity"]
+)
+def test_async_deadline_at_api(client, mode_request, run_env, hours):
+    mode_request["training_mode"] = "colocate_async"
+    if hours == "omitted":
+        mode_request["compute"].pop("max_hours")
+    else:
+        mode_request["compute"]["max_hours"] = hours
+    code = (
+        "run.async_deadline_required" if hours in ("omitted", None, 1 / 7200) else "request.invalid"
+    )
+    _assert_mode_rejected(client, mode_request, code, run_env)
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("literal, encoded", [("1e999", "inf"), ("-1e999", "-inf")])
+def test_overflow_deadline_json_is_422_without_side_effects(
+    client, mode_request, run_env, mode, literal, encoded
+):
+    mode_request["training_mode"] = mode
+    mode_request["compute"]["max_hours"] = "RAW_HOURS"
+    # Legal JSON numbers can overflow Python floats; json= would reject them client-side.
+    body = json.dumps(mode_request).replace('"RAW_HOURS"', literal)
+    with session_scope() as s:
+        counts = (s.query(Run).count(), s.query(Job).count())
+    for endpoint in ("/api/runs/preview", "/api/runs"):
+        response = client.post(endpoint, content=body, headers={"Content-Type": "application/json"})
+        assert response.status_code == 422, response.text
+        error = response.json()
+        assert error["code"] == "request.invalid"
+        detail = error["detail"][0]
+        assert detail["loc"] == ["body", "compute", "max_hours"]
+        assert detail["input"] == encoded
+        assert isinstance(next(iter(detail["ctx"].values())), (int, float))
+    with session_scope() as s:
+        assert (s.query(Run).count(), s.query(Job).count()) == counts
+    assert run_env["hp"]["current"] == 0
+    assert not run_env["applied"]
+
+
+@pytest.mark.parametrize("hours", [None, 1 / 3600, 720])
+@pytest.mark.parametrize("mode", MODES)
+def test_valid_deadline_api_and_cost_confirmation(client, mode_request, run_env, hours, mode):
+    mode_request.update(training_mode=mode, confirm_cost=False)
+    mode_request["compute"]["max_hours"] = hours
+    response = client.post("/api/runs/preview", json=mode_request)
+    if mode == "colocate_async" and hours is None:
+        assert response.json()["code"] == "run.async_deadline_required"
+        return
+    assert response.status_code == 200, response.text
+    rejected = client.post("/api/runs", json=mode_request)
+    assert rejected.json()["code"] == "run.confirm_cost"
+    with session_scope() as s:
+        assert s.query(Run).count() == 1 and s.query(Job).count() == 0
+    assert not run_env["applied"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("profile", ["fsdp", "megatron"])
+@pytest.mark.parametrize("tuning", ["full", "lora"])
+def test_two_modes_four_strategy_render_contract(run_env, mode, profile, tuning):
+    from app.pipelines.run import load_run
+
+    run = load_run("run-1")
+    run["compute"].update(instance_type="p5.48xlarge", nodes=2, max_hours=1)
+    run["spec"].update(
+        training_mode=mode,
+        plan=plan(
+            params_b=4, spec=CATALOG["p5.48xlarge"], nodes=2, prefer=profile, tuning=tuning
+        ).to_dict(),
+        params={
+            "train_batch_size": 8,
+            "ppo_mini_batch_size": 4,
+            "temperature": 0,
+            "val_temperature": 0,
+            "kl_loss_coef": 0,
+        },
+    )
+    objs = _mode_render(run)
+    h = dict(x.split("=", 1) for x in objs["hydra"])
+    assert h["trainer.v1.trainer_mode"] == f"agentcore_{mode}"
+    assert h["trainer.use_v1"] == "true" and h["algorithm.adv_estimator"] == "grpo"
+    assert h["actor_rollout_ref.actor.loss_agg_mode"] == "seq-mean-token-sum"
+    assert h["actor_rollout_ref.rollout.mode"] == "async"
+    assert h["actor_rollout_ref.rollout.calculate_log_probs"] == "true"
+    assert h["algorithm.rollout_correction.rollout_is"] == "token"
+    assert h["algorithm.rollout_correction.rollout_is_threshold"] == "2.0"
+    assert (
+        h["data.train_batch_size"] == "8"
+        and h["actor_rollout_ref.actor.ppo_mini_batch_size"] == "4"
+    )
+    for key in (
+        "actor_rollout_ref.rollout.temperature",
+        "actor_rollout_ref.rollout.val_kwargs.temperature",
+        "actor_rollout_ref.actor.kl_loss_coef",
+    ):
+        assert h[key] == "0"
+    async_keys = {
+        "trainer.v1.colocate_async.num_warmup_batches": "1",
+        "trainer.v1.sampler.max_off_policy_threshold": "8",
+        "trainer.v1.sampler.max_off_policy_strategy": "drop",
+        "+trainer.v1.colocate_async.parameter_sync_step": "1",
+    }
+    if mode == "colocate_async":
+        assert {key: h[key] for key in async_keys} == async_keys
+    else:
+        assert not async_keys.keys() & h.keys()
+    assert not any("agentcore_colocate_async." in key for key in h)
+    assert h["actor_rollout_ref.actor.use_dynamic_bsz"] == str(profile == "fsdp").lower()
+    if profile == "megatron":
+        assert h["actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu"] == "1"
+        assert h["actor_rollout_ref.actor.checkpoint.save_contents"] == '["model"]'
+    if tuning == "lora":
+        if profile == "fsdp":
+            assert h["actor_rollout_ref.rollout.load_format"] == "safetensors"
+            assert h["actor_rollout_ref.model.lora_rank"] == "32"
+        else:
+            assert h["actor_rollout_ref.model.lora.merge"] == "true"
+            assert h["actor_rollout_ref.model.lora.rank"] == "64"
+    script = objs["config_map"]["data"]["train.sh"]
+    assert ("--config-name ppo_megatron_trainer" in script) == (profile == "megatron")
+    loop = yaml.safe_load(objs["config_map"]["data"]["agentcore_agent.yaml"])[0]
+    assert loop["require_registered_sessions"] is True
+    job = objs["rayjob"]["spec"]
+    assert job["activeDeadlineSeconds"] == 3600
+    head = job["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]
+    env = {e["name"]: e.get("value") for e in head["containers"][0]["env"]}
+    assert env["VERL_USE_EXTERNAL_MODULES"] == "agentcore_rl_toolkit.backends.verl.trainer"
+    assert head["containers"][0]["resources"]["limits"]["nvidia.com/gpu"] == 8
+    assert job["rayClusterSpec"]["workerGroupSpecs"][0]["replicas"] == 1
+    assert h["trainer.nnodes"] == "2" and h["trainer.n_gpus_per_node"] == "8"
+
+
+@pytest.mark.parametrize("mode", ["legacy", *MODES])
+@pytest.mark.parametrize(
+    "itype,nodes,units,cpu,gpus",
+    [
+        ("p5.4xlarge", 1, 2, 8, 1),
+        ("p5.4xlarge", 2, None, 8, 1),
+        ("p5.48xlarge", 1, None, 184, 8),
+        ("p5.48xlarge", 2, None, 184, 8),
+        ("p4d.24xlarge", 1, None, 88, 8),
+    ],
+)
+def test_transfer_queue_cpu_budget_preserves_resources(
+    run_env, mode, itype, nodes, units, cpu, gpus
+):
+    from app.pipelines.run import load_run
+
+    run = load_run("run-1")
+    run["compute"].update(instance_type=itype, nodes=nodes, max_hours=1)
+    run["spec"]["plan"] = plan(params_b=2.27, spec=CATALOG[itype], nodes=nodes).to_dict()
+    if mode != "legacy":
+        run["spec"]["training_mode"] = mode
+    rendered = _mode_render(run)
+    h = dict(x.split("=", 1) for x in rendered["hydra"])
+    key = "transfer_queue.backend.SimpleStorage.num_data_storage_units"
+    if units is None:
+        assert key not in h  # preserve upstream 8; do not pin large/multinode defaults
+    else:
+        assert h[key] == str(units)
+        assert units + 1 + 3 * gpus + 2 == cpu  # controller + training PG + admission/spare
+        assert f"{key}={units}" in rendered["config_map"]["data"]["train.sh"]
+    assert not any(k.startswith("ray_kwargs.") for k in h)
+    assert "transfer_queue.enable" not in h  # V1 forces enable for both modes
+    assert "transfer_queue.backend.SimpleStorage.total_storage_size" not in h
+    assert h["actor_rollout_ref.rollout.agent.num_workers"] == "1"
+    assert h["trainer.nnodes"] == str(nodes) and h["trainer.n_gpus_per_node"] == str(gpus)
+    job = rendered["rayjob"]["spec"]
+    assert job["activeDeadlineSeconds"] == 3600
+    cluster = job["rayClusterSpec"]
+    groups = [cluster["headGroupSpec"], *cluster["workerGroupSpecs"]]
+    assert sum(g.get("replicas", 1) for g in groups) == nodes
+    for group in groups:
+        assert "num-cpus" not in group["rayStartParams"]  # no fake CPU advertising
+        assert group["rayStartParams"]["num-gpus"] == str(gpus)
+        res = group["template"]["spec"]["containers"][0]["resources"]
+        assert res["requests"] == res["limits"]
+        assert res["limits"]["cpu"] == str(cpu)
+        assert res["limits"]["nvidia.com/gpu"] == gpus
+    assert not any("storage_units" in key for key in rt.DEFAULT_PARAMS)
+
+
+@pytest.mark.parametrize(
+    "vcpus,expected", [(16, "2"), (18, "4"), (21, "7"), (22, None), (32, None)]
+)
+def test_transfer_queue_single_node_override_tracks_pod_cpu_budget(vcpus, expected):
+    from dataclasses import replace
+
+    spec = replace(CATALOG["p5.4xlarge"], vcpus=vcpus)
+    h = dict(
+        x.split("=", 1)
+        for x in rt.overrides(
+            plan=plan(params_b=2.27, spec=spec).to_dict(),
+            params=rt.merge_params({}),
+            spec=spec,
+            nodes=1,
+            model_path="m",
+            train_file="t",
+            val_file=None,
+            ckpt_dir="c",
+            project="p",
+            experiment="e",
+        )
+    )
+    assert h.get("transfer_queue.backend.SimpleStorage.num_data_storage_units") == expected
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("mini", ["omitted", None, 1, 4, 8])
+def test_mini_batch_inheritance(run_env, mode, mini):
+    from app.pipelines.run import load_run
+
+    run = load_run("run-1")
+    run["compute"]["max_hours"] = 1
+    params = {"train_batch_size": 8}
+    if mini != "omitted":
+        params["ppo_mini_batch_size"] = mini
+    run["spec"].update(training_mode=mode, params=params)
+    h = dict(x.split("=", 1) for x in _mode_render(run)["hydra"])
+    expected = 8 if mini in ("omitted", None) else mini
+    assert h["actor_rollout_ref.actor.ppo_mini_batch_size"] == str(expected)
+
+
+@pytest.mark.parametrize("mode", ["legacy", *MODES])
+@pytest.mark.parametrize("hours", ["omitted", None, 1 / 3600, 720])
+def test_manifest_deadline_boundaries(run_env, mode, hours):
+    from app.pipelines.run import load_run
+
+    run = load_run("run-1")
+    if mode != "legacy":
+        run["spec"]["training_mode"] = mode
+    if hours != "omitted":
+        run["compute"]["max_hours"] = hours
+    if mode == "colocate_async" and hours in ("omitted", None):
+        with pytest.raises(AppError, match="at least one second"):
+            _mode_render(run)
+    else:
+        job = _mode_render(run)["rayjob"]["spec"]
+        if hours in ("omitted", None):
+            assert "activeDeadlineSeconds" not in job
+        else:
+            assert type(job["activeDeadlineSeconds"]) is int
+            assert job["activeDeadlineSeconds"] == int(hours * 3600)
+
+
+@pytest.mark.parametrize("key", ["train_batch_size", "ppo_mini_batch_size"])
+@pytest.mark.parametrize("value", [0, -1, 2.5, True, "8", 3])
+def test_low_level_renderer_rejects_invalid_batches(key, value):
+    params = {**rt.DEFAULT_PARAMS, "train_batch_size": 8, "ppo_mini_batch_size": 4, key: value}
+    with pytest.raises(AppError) as error:
+        rt.overrides(
+            plan=plan(params_b=2, spec=CATALOG["p5.4xlarge"]).to_dict(),
+            params=params,
+            spec=CATALOG["p5.4xlarge"],
+            nodes=1,
+            model_path="m",
+            train_file="t",
+            val_file=None,
+            ckpt_dir="c",
+            project="p",
+            experiment="e",
+        )
+    assert error.value.code == "run.invalid_batch"
+
+
+@pytest.mark.parametrize("mode", INVALID_MODES)
+def test_invalid_stored_mode_never_falls_back(client, run_env, mode):
+    from app.pipelines import run as pr
+
+    _stored_mode(mode)
+    original = pr.load_run("run-1")["spec"]
+    with pytest.raises(AppError) as error:
+        _mode_render(pr.load_run("run-1"))
+    assert error.value.code == "run.invalid_training_mode"
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.error_code == "run.invalid_training_mode"
+    assert job.stages[0]["status"] == "failed"
+    assert all(stage["status"] == "pending" for stage in job.stages[1:])
+    assert not run_env["applied"] and run_env["hp"]["current"] == 0
+    # Resume cannot write a new Job or change the original invalid spec either.
+    response = client.post("/api/runs/run-1/resume")
+    assert response.json()["code"] == "run.invalid_training_mode"
+    with session_scope() as s:
+        assert s.query(Job).count() == 1
+        assert s.get(Run, "run-1").spec == original
+        assert s.get(Run, "run-1").status == "failed"
+
+
+@pytest.mark.parametrize("stage", ["stage_preflight", "stage_image", "stage_capacity"])
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("training_mode", None, "run.invalid_training_mode"),
+        ("params", {"ppo_mini_batch_size": 0}, "run.invalid_batch"),
+        ("params", {"ppo_mini_batch_size": 3}, "run.invalid_batch"),
+        ("plan", {"profile": "fsdp", "strategy": "megatron_full"}, "run.bad_plan_override"),
+        ("max_hours", None, "run.async_deadline_required"),
+        ("max_hours", 0, "run.async_deadline_required"),
+        ("max_hours", -1, "run.async_deadline_required"),
+        ("max_hours", 1 / 7200, "run.async_deadline_required"),
+        ("max_hours", 721, "run.async_deadline_required"),
+        ("max_hours", float("inf"), "run.async_deadline_required"),
+        ("max_hours", float("-inf"), "run.async_deadline_required"),
+        ("max_hours", float("nan"), "run.async_deadline_required"),
+    ],
+)
+def test_stored_contract_rejected_before_external_work(
+    run_env, monkeypatch, stage, field, value, code
+):
+    from types import SimpleNamespace
+
+    from app.pipelines import run as pr
+
+    _stored_mode("colocate_async")
+    with session_scope() as s:
+        row = s.get(Run, "run-1")
+        if field == "max_hours":
+            row.compute = {**row.compute, field: value}
+        else:
+            row.spec = {**row.spec, field: value}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("contract validation must precede context/image/capacity work")
+
+    monkeypatch.setattr(pr, "_context", forbidden)
+    monkeypatch.setattr(pr.pc, "load", forbidden)
+    with pytest.raises(AppError) as error:
+        getattr(pr, stage)(SimpleNamespace(target_id="run-1"))
+    assert error.value.code == code
+    with pytest.raises(AppError) as error:
+        _mode_render(pr.load_run("run-1"))
+    assert error.value.code == code
+    with session_scope() as s:
+        assert s.get(Run, "run-1").status == "queued"
+        assert s.query(Job).count() == 0
+    assert not run_env["applied"] and run_env["hp"]["current"] == 0
+
+
+def test_legacy_sync_is_read_only_and_identical_to_explicit_sync(client, run_env):
+    from copy import deepcopy
+
+    from app.pipelines import run as pr
+
+    original = pr.load_run("run-1")
+    explicit = deepcopy(original)
+    explicit["spec"]["training_mode"] = "sync"
+    assert _mode_render(original) == _mode_render(explicit)
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    assert "training_mode" not in client.get("/api/runs/run-1").json()["spec"]
+    with session_scope() as s:
+        assert s.get(Run, "run-1").spec == original["spec"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_retry_and_manual_resume_preserve_original_mode(client, run_env, mode):
+    _stored_mode(mode)
+    with session_scope() as s:
+        original = s.get(Run, "run-1").spec
+    run_env["states"].append({"job": "FAILED", "deployment": "Failed", "message": "worker lost"})
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    response = client.post("/api/runs/run-1/resume")
+    assert response.status_code == 200, response.text
+    resumed = _wait(response.json()["job_id"])
+    assert resumed.status == "succeeded", resumed.error
+    cms = [obj for obj in run_env["applied"] if obj["kind"] == "ConfigMap"]
+    jobs = [obj for obj in run_env["applied"] if obj["kind"] == "RayJob"]
+    assert len(cms) == 3
+    assert [j["metadata"]["name"] for j in jobs] == ["run-1-a0", "run-1-a1", "run-1-a2"]
+    for cm in cms:
+        hydra = json.loads(cm["data"]["hydra.json"])
+        assert f"trainer.v1.trainer_mode=agentcore_{mode}" in hydra
+        assert "trainer.resume_mode=auto" in hydra
+    # Deadline is per attempt; retries do not consume a shared time budget.
+    assert [j["spec"]["activeDeadlineSeconds"] for j in jobs] == [3600] * 3
+    with session_scope() as s:
+        assert s.get(Run, "run-1").spec == original
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("already_submitted", [False, True])
+def test_backend_restart_keeps_mode_and_does_not_duplicate_submission(
+    run_env, mode, already_submitted
+):
+    _stored_mode(mode)
+    with session_scope() as s:
+        row = s.get(Run, "run-1")
+        original = row.spec
+        if already_submitted:
+            row.rayjob_name = "run-1-a0"
+            row.progress = {"attempt": 0}
+        s.add(
+            Job(
+                id="job-restart",
+                type="run.train",
+                target_id="run-1",
+                status="running",
+                payload={},
+                context={"image": "img:fsdp"},
+                stages=[
+                    {
+                        "name": name,
+                        "status": "succeeded"
+                        if name in ("preflight", "image", "capacity")
+                        else "pending",
+                    }
+                    for name in ("preflight", "image", "capacity", "submit", "monitor", "finalize")
+                ],
+            )
+        )
+    eng.get_engine().shutdown()
+    eng.set_engine(eng.JobEngine(max_workers=2))
+    assert eng.get_engine().resume_pending() == ["job-restart"]
+    job = _wait("job-restart")
+    assert job.status == "succeeded", job.error
+    cms = [obj for obj in run_env["applied"] if obj["kind"] == "ConfigMap"]
+    if already_submitted:
+        assert not run_env["applied"]
+    else:
+        assert len(cms) == 1
+        assert f"trainer.v1.trainer_mode=agentcore_{mode}" in json.loads(
+            cms[0]["data"]["hydra.json"]
+        )
+    with session_scope() as s:
+        assert s.get(Run, "run-1").spec == original

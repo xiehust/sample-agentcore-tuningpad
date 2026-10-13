@@ -14,7 +14,7 @@ from ..models import AgentRuntime, Dataset, Run, RunMetric
 from ..pipelines import cluster as pc
 from ..pipelines.run import load_run
 from ..planner import plan as make_plan
-from ..render.train import AGENT_LOOP_DEFAULTS, DEFAULT_PARAMS, merge_params
+from ..render.train import AGENT_LOOP_DEFAULTS, DEFAULT_PARAMS, TrainingMode, merge_params
 from ..services import hyperpod as hp
 from ..services import pools
 from ..services import project as proj
@@ -55,6 +55,7 @@ class CreateRun(BaseModel):
     model_id: str
     prefer: str = Field("auto", pattern="^(auto|fsdp|megatron)$")
     tuning: str = Field("auto", pattern="^(auto|full|lora)$")
+    training_mode: TrainingMode = "sync"
     params: dict[str, Any] = Field(default_factory=dict)
     plan_overrides: dict[str, Any] = Field(default_factory=dict)
     compute: Compute
@@ -115,6 +116,10 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         if k not in p or k in {"warnings", "reasons", "world_size"}:
             raise AppError("run.bad_plan_override", f"cannot override plan field {k}")
         p[k] = v
+    mode, params, _ = svc.validate_training_contract(
+        {"training_mode": body.training_mode, "plan": p, "params": body.params},
+        body.compute.model_dump(),
+    )
     if template_id:
         get_template(template_id)
     plan_info = None
@@ -134,6 +139,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
     else:
         body.compute.training_plan_arn = None
     return {
+        "training_mode": mode,
         "training_plan": plan_info,
         "cluster_id": cluster_id,
         "region": region,
@@ -152,6 +158,7 @@ def defaults():
 def preview(body: CreateRun):
     v = _validate(body)
     return {
+        "training_mode": v["training_mode"],
         "plan": v["plan"],
         "params": v["params"],
         "model": v["model"],
@@ -181,6 +188,7 @@ def create(body: CreateRun):
                 val_dataset_id=body.val_dataset_id,
                 model_id=body.model_id,
                 spec={
+                    "training_mode": v["training_mode"],
                     "plan": v["plan"],
                     "params": body.params,
                     "val_split": body.val_split,
@@ -297,6 +305,7 @@ def resume(run_id: str):
         raise AppError("run.active", "run is still active", status=409)
     from ..pipelines.run import save_run
 
+    svc.validate_training_contract(run["spec"], run["compute"])
     save_run(run_id, status="queued", error=None, ended_at=None, retries=0)
     return {"job_id": get_engine().start("run.train", run_id, {"resume": True})}
 

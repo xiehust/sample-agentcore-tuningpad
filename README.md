@@ -24,8 +24,29 @@ Console (React) ─► FastAPI control plane (this host) ─► CloudFormation �
 
 Cost guardrails that keep running when the console is offline:
 - The in-cluster guardian CronJob scales idle GPU groups to 0 and enforces the cluster budget.
-- `activeDeadlineSeconds` on every RayJob.
+- RayJob `activeDeadlineSeconds` when max hours is set; required for same-pool async.
 - Every GPU scale-up requires an explicit cost confirmation.
+
+### Training modes
+
+The model step offers `sync` (default, also used for old runs with no mode) and
+`colocate_async` (experimental). The mode is kept through preview, creation and
+retries/resume, and shown in review, cost confirmation and run configuration.
+Explicit null or unknown modes are invalid, not aliases for sync.
+
+Same-pool async time-shares the **same GPU pool** between sampling and training;
+it is not concurrent training/inference GPU kernels and promises no speedup.
+Failed prompt groups are dropped and resampled without sync's drop-fraction guard,
+so sampling can continue without training progress. Pinned TransferQueue **0.1.8**
+cannot restore its queue; checkpoints do not guarantee in-flight sample recovery
+or optimizer continuity for every profile (Megatron saves model-only state).
+
+Async requires finite `compute.max_hours` (at most 720) yielding at least one whole
+second of deadline. The wizard keeps its existing 6-hour default; clearing it
+requires an explicit valid value before preview/submission. Sync may leave it blank.
+This limits **each RayJob attempt**, not queueing, capacity waits, all retries or
+total charges. Cost estimates and budgets are not a hard billing cap. Existing
+checkpoint/resume and cost guardrails remain; no extra GPU pool is added.
 
 ## Run locally
 

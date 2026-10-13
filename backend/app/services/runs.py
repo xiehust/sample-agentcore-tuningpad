@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from botocore.exceptions import ClientError
 
 from ..catalog import instances
 from ..core import aws
+from ..core.errors import AppError
 from ..render import train as rt
 from . import kube, pools
 
@@ -27,6 +29,31 @@ def run_dir(run_id: str) -> str:
     return f"{rt.FSX_MOUNT}/runs/{run_id}"
 
 
+def validate_training_contract(
+    spec: dict[str, Any], compute: dict[str, Any]
+) -> tuple[rt.TrainingMode, dict[str, Any], int | None]:
+    """Pure validation before persistence, image/capacity work and every submission.
+
+    Legacy specs fall back only when the key is absent. The deadline bounds a RayJob
+    attempt, not capacity waits, retries or the total Run cost.
+    """
+    params = rt.merge_params(spec.get("params"))
+    mode = rt.validate_training_contract(spec.get("training_mode", "sync"), spec["plan"], params)
+    hours = compute.get("max_hours")
+    if mode == "colocate_async":
+        if (
+            type(hours) not in (int, float)
+            or not 0 < hours <= 720
+            or not math.isfinite(hours)
+            or int(hours * 3600) < 1
+        ):
+            raise AppError(
+                "run.async_deadline_required",
+                "colocate_async requires finite max_hours ≤ 720 yielding at least one second",
+            )
+    return mode, params, int(hours * 3600) if hours else None
+
+
 def render(
     run: dict[str, Any],
     *,
@@ -38,10 +65,10 @@ def render(
     datasets: dict[str, str],
     attempt: int,
 ) -> dict[str, Any]:
+    mode, params, deadline = validate_training_contract(run["spec"], run["compute"])
     spec = instances.spec(run["compute"]["instance_type"])
     nodes = int(run["compute"]["nodes"])
     plan = run["spec"]["plan"]
-    params = rt.merge_params(run["spec"].get("params"))
     rdir = run_dir(run["id"])
     model_dir = f"{rt.FSX_MOUNT}/models/{run['model_id'].replace('/', '--')}"
     data_files = {f"{rdir}/data/train.parquet": datasets["train"]}
@@ -58,6 +85,7 @@ def render(
         ckpt_dir=f"{rdir}/ckpt",
         project="tuningpad",
         experiment=run["id"],
+        training_mode=mode,
     )
     script = rt.train_script(
         run_id=run["id"],
@@ -88,7 +116,6 @@ def render(
         multi_node=nodes > 1,
         spec=spec,
     )
-    max_hours = run["compute"].get("max_hours")
     job = rt.rayjob(
         run_id=run["id"],
         name=rayjob_name(run["id"], attempt),
@@ -101,11 +128,14 @@ def render(
         config_map=config_map_name(run["id"]),
         service_account="tuningpad-workload",
         pvc="fsx",
-        active_deadline_s=int(max_hours * 3600) if max_hours else None,
+        active_deadline_s=deadline,
         node_selector=pools.node_selector(
             run["compute"].get("provider", pools.HYPERPOD), run["compute"]["instance_group"]
         ),
     )
+    if mode == "colocate_async":
+        rendered_deadline = job["spec"].get("activeDeadlineSeconds")
+        assert type(rendered_deadline) is int and rendered_deadline >= 1
     return {"config_map": cm, "rayjob": job, "hydra": hydra}
 
 

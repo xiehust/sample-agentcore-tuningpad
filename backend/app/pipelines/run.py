@@ -92,6 +92,7 @@ def _context(run: dict[str, Any]) -> dict[str, Any]:
 
 def stage_preflight(ctx: StageContext) -> None:
     run = load_run(ctx.target_id)
+    svc.validate_training_contract(run["spec"], run["compute"])
     c = _context(run)
     if c["cluster"]["status"] != "ready":
         raise AppError("run.cluster_not_ready", f"cluster is {c['cluster']['status']}")
@@ -112,6 +113,8 @@ def stage_preflight(ctx: StageContext) -> None:
 
 def stage_image(ctx: StageContext) -> None:
     run = load_run(ctx.target_id)
+    # A restarted job can skip an already-succeeded preflight.
+    svc.validate_training_contract(run["spec"], run["compute"])
     region = pc.load(run["cluster_id"])["region"]
     tid, ready = ptrainer.find_or_create(region, run["spec"]["plan"]["profile"])
     ctx.set("trainer_image_id", tid)
@@ -199,6 +202,7 @@ def _capacity_ec2(ctx: StageContext, run: dict[str, Any], c: dict[str, Any]) -> 
 
 def stage_capacity(ctx: StageContext) -> None:
     run = load_run(ctx.target_id)
+    svc.validate_training_contract(run["spec"], run["compute"])
     c = pc.load(run["cluster_id"])
     if _provider(run) == pools.EC2:
         return _capacity_ec2(ctx, run, c)

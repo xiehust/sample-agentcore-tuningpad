@@ -573,6 +573,8 @@ export const datasetApi = {
 
 /* ---------- runs ---------- */
 
+export type TrainingMode = "sync" | "colocate_async";
+
 export interface RunCompute {
   instance_group: string;
   instance_type: string;
@@ -596,6 +598,7 @@ export interface CreateRunBody {
   model_id: string;
   prefer: string;
   tuning: string;
+  training_mode?: TrainingMode;
   params: Record<string, unknown>;
   compute: RunCompute;
   confirm_cost?: boolean;
@@ -628,7 +631,7 @@ export interface RunView {
   train_dataset_id: string;
   val_dataset_id: string | null;
   model_id: string;
-  spec: { plan: Plan; params: Record<string, unknown>; val_split: string; estimate?: RunEstimate };
+  spec: { training_mode?: TrainingMode; plan: Plan; params: Record<string, unknown>; val_split: string; estimate?: RunEstimate };
   compute: RunCompute;
   status: string;
   rayjob_name: string | null;
@@ -672,7 +675,7 @@ export const runApi = {
   list: () => get<RunView[]>("/api/runs"),
   get: (id: string) => get<RunView>(`/api/runs/${id}`),
   preview: (body: CreateRunBody) =>
-    post<{ plan: Plan; params: Record<string, unknown>; model: ModelCheck; estimate: RunEstimate; training_plan: TrainingPlan | null }>("/api/runs/preview", body),
+    post<{ training_mode: TrainingMode; plan: Plan; params: Record<string, unknown>; model: ModelCheck; estimate: RunEstimate; training_plan: TrainingPlan | null }>("/api/runs/preview", body),
   create: (body: CreateRunBody) => post<{ id: string; job_id: string }>("/api/runs", body),
   series: (id: string, keys: string[]) => get<Record<string, [number, number][]>>(`/api/runs/${id}/series?${q({ keys: keys.join(",") })}`),
   log: (id: string, offset: number) => get<LogChunk>(`/api/runs/${id}/log?offset=${offset}`),

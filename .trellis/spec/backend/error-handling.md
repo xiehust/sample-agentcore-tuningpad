@@ -50,8 +50,12 @@ Do not wrap it in FastAPI's usual `{"detail": ...}` shape in new domain code.
 
 `aws_error_detail()` exposes only `aws_code`, `aws_message`, and `operation` from a
 `ClientError`; it does not return the whole SDK response. Validation errors are encoded
-with `jsonable_encoder(..., custom_encoder={Exception: str})`, because Pydantic validators
-may put an exception object in `ctx`. Preserve that serialization behavior.
+with `jsonable_encoder` custom encoders: exceptions become strings; non-finite floats
+become `"inf"` / `"-inf"` / `"nan"`, while finite floats remain numbers. Pydantic can put
+exceptions in `ctx` and overflowing JSON numbers in `input`. Preserve both encoders:
+raw `compute.max_hours: 1e999` / `-1e999` must return 422 `request.invalid`, not a JSON
+serialization 500. `test_runs.py:test_overflow_deadline_json_is_422_without_side_effects`
+checks both routes/modes, safe detail and unchanged Run/Job counts.
 
 `backend/app/core/auth.py:AuthMiddleware` returns equivalent JSON envelopes directly for
 `auth.required` (401) and `auth.loopback_only` (403). It does not rely on raising from

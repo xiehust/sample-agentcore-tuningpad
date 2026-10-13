@@ -19,6 +19,7 @@ import {
   type RunCompute,
   type RunEstimate,
   type RunView,
+  type TrainingMode,
   type TrainingPlan,
 } from "../lib/api";
 import { dateTime, duration, money, num } from "../lib/format";
@@ -47,6 +48,17 @@ import {
 import { PlanCard } from "../components/ModelCards";
 
 const ACTIVE = new Set(["queued", "preparing", "waiting_capacity", "running", "retrying"]);
+
+function trainingModeLabel(mode: unknown) {
+  if (mode === "sync") return "runs.trainingModeSync";
+  if (mode === "colocate_async") return "runs.trainingModeAsync";
+  return "runs.trainingModeInvalid";
+}
+
+function AsyncTrainingNote() {
+  const { t } = useTranslation();
+  return <Alert tone="warn">{t("runs.asyncHint")} {t("runs.attemptLimitHint")}</Alert>;
+}
 
 /* ------------------------------------------------------------------ list */
 
@@ -134,12 +146,13 @@ function RunWizard() {
   const [modelId, setModelId] = useState("Qwen/Qwen3.5-2B");
   const [prefer, setPrefer] = useState("auto");
   const [tuning, setTuning] = useState("auto");
+  const [trainingMode, setTrainingMode] = useState<TrainingMode>("sync");
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [compute, setCompute] = useState<RunCompute>({
     instance_group: "gpu-p5", instance_type: "p5.48xlarge", nodes: 1, provider: "hyperpod", capacity: "on_demand",
     scale_up: true, scale_down_after: true, max_hours: 6, budget_usd: null, max_retries: 2,
   });
-  const [preview, setPreview] = useState<{ plan: Plan; estimate: RunEstimate; training_plan: TrainingPlan | null } | null>(null);
+  const [preview, setPreview] = useState<{ training_mode: TrainingMode; plan: Plan; estimate: RunEstimate; training_plan: TrainingPlan | null } | null>(null);
   const [planOk, setPlanOk] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -177,12 +190,21 @@ function RunWizard() {
 
   const body = (): CreateRunBody => ({
     name, agent_runtime_id: runtimeId, train_dataset_id: trainId, val_dataset_id: valId || null,
-    val_split: valSplit, model_id: modelId, prefer, tuning,
+    val_split: valSplit, model_id: modelId, prefer, tuning, training_mode: trainingMode,
     params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")),
     compute: { ...compute, training_plan_arn: compute.capacity === "training_plan" ? compute.training_plan_arn?.trim() || null : null },
   });
 
+  const asyncMode = trainingMode === "colocate_async";
+  const deadlineValid = !asyncMode || (typeof compute.max_hours === "number"
+    && Number.isFinite(compute.max_hours) && compute.max_hours <= 720
+    && Math.trunc(compute.max_hours * 3600) >= 1);
+  const canNext = [!!runtimeId && !!name, !!trainId, !!modelId && defaultsReady && deadlineValid,
+    !!compute.instance_type && compute.nodes > 0 && deadlineValid && (compute.capacity !== "training_plan" || planOk), true][step];
+  const canSubmit = deadlineValid && !!preview && preview.training_mode === trainingMode;
+
   const next = async () => {
+    if (busy || !canNext) return;
     if (step === 2 || step === 3) {
       setBusy(true);
       try {
@@ -199,6 +221,7 @@ function RunWizard() {
   };
 
   const submit = async () => {
+    if (busy || !confirm || !canSubmit) return;
     setBusy(true);
     try {
       const r = await runApi.create({ ...body(), confirm_cost: true });
@@ -211,7 +234,6 @@ function RunWizard() {
     }
   };
 
-  const canNext = [!!runtimeId && !!name, !!trainId, !!modelId && defaultsReady, !!compute.instance_type && compute.nodes > 0 && (compute.capacity !== "training_plan" || planOk), true][step];
   const itype = instances.data?.instances.find((i) => i.type === compute.instance_type);
   const ec2 = compute.provider === "ec2";
 
@@ -225,7 +247,7 @@ function RunWizard() {
           step < 4 ? (
             <Button kind="primary" disabled={!canNext || busy} onClick={() => void next()} testId="tp-run-next">{t("common.next")}</Button>
           ) : (
-            <Button kind="primary" disabled={busy} onClick={() => setConfirm(true)} testId="tp-run-start">{t("runs.start")}</Button>
+            <Button kind="primary" disabled={busy || !canSubmit} onClick={() => setConfirm(true)} testId="tp-run-start">{t("runs.start")}</Button>
           )
         }
       />
@@ -288,7 +310,20 @@ function RunWizard() {
               <Field label={t("runs.tuning")}>
                 <Select value={tuning} onChange={setTuning} options={[{ value: "auto", label: t("runs.auto") }, { value: "full", label: t("runs.full") }, { value: "lora", label: "LoRA" }]} />
               </Field>
+              <Field label={t("runs.trainingMode")} full>
+                <Segmented<TrainingMode>
+                  value={trainingMode}
+                  onChange={setTrainingMode}
+                  ariaLabel={t("runs.trainingMode")}
+                  options={[
+                    { value: "sync", label: t("runs.trainingModeSync") },
+                    { value: "colocate_async", label: t("runs.trainingModeAsync") },
+                  ]}
+                />
+              </Field>
             </div>
+            {asyncMode && <AsyncTrainingNote />}
+            {!deadlineValid && <Alert tone="error" action={<Button size="sm" onClick={() => { setPreview(null); setStep(3); }}>{t("runs.stepCompute")}</Button>}>{t("apiErrors.run.async_deadline_required")}</Alert>}
           </Card>
           <Card title={t("runs.basicParams")}>
             <div className="v2-form cols-2">{BASIC_KEYS.map((k) => <NumField key={k} k={k} params={params} defaults={paramDefaults} setParams={setParams} />)}</div>
@@ -352,8 +387,8 @@ function RunWizard() {
                   onValid={(p) => setPlanOk(!!p)}
                 />
               )}
-              <Field label={t("runs.maxHours")} hint={t("runs.maxHoursHint")}>
-                <input className="v2-input" type="number" min={0.5} step={0.5} value={compute.max_hours ?? ""} onChange={(e) => setCompute({ ...compute, max_hours: e.target.value ? Number(e.target.value) : null })} />
+              <Field label={t("runs.maxHours")} required={asyncMode} hint={t("runs.maxHoursHint")} error={!deadlineValid ? t("apiErrors.run.async_deadline_required") : null}>
+                <input className="v2-input" type="number" min={asyncMode ? 1 / 3600 : 0.5} max={720} step={asyncMode ? "any" : 0.5} aria-label={t("runs.maxHours")} aria-invalid={!deadlineValid} data-testid="tp-run-max-hours" value={compute.max_hours ?? ""} onChange={(e) => setCompute({ ...compute, max_hours: e.target.value ? Number(e.target.value) : null })} />
               </Field>
               <Field label={t("runs.budget")} hint={t("runs.budgetHint")}>
                 <input className="v2-input" type="number" min={1} value={compute.budget_usd ?? ""} onChange={(e) => setCompute({ ...compute, budget_usd: e.target.value ? Number(e.target.value) : null })} />
@@ -383,6 +418,7 @@ function RunWizard() {
                 { label: t("runs.runtime"), value: chosen ? `${chosen.agent.name} · ${cluster?.name}` : "—" },
                 { label: t("runs.trainData"), value: readyDatasets.find((d) => d.id === trainId)?.name },
                 { label: t("runs.model"), value: <span className="tp-mono">{modelId}</span> },
+                { label: t("runs.trainingMode"), value: t(trainingModeLabel(preview.training_mode)) },
                 { label: t("runs.compute"), value: `${compute.nodes} × ml.${compute.instance_type} (${compute.instance_group})` },
                 { label: t("clusters.capacity"), value: `${t(`runs.source_${compute.provider ?? "hyperpod"}`)} · ${t(`clusters.capacity_${compute.capacity}`)}` },
                 ...(preview.training_plan
@@ -392,18 +428,23 @@ function RunWizard() {
               ]}
             />
           </Card>
+          {asyncMode && <AsyncTrainingNote />}
           <PlanCard plan={preview.plan} />
         </div>
       )}
       <Confirm
         open={confirm}
         title={t("runs.confirmTitle")}
-        body={preview ? t("runs.confirmBody", { hourly: money(preview.estimate.hourly_usd), max: money(preview.estimate.max_cost_usd) }) : ""}
+        body={preview ? <div className="tp-stack">
+          <p>{t("runs.confirmBody", { hourly: money(preview.estimate.hourly_usd), max: money(preview.estimate.max_cost_usd) })}</p>
+          <p>{t("runs.trainingMode")}: {t(trainingModeLabel(preview.training_mode))}</p>
+          {asyncMode && <AsyncTrainingNote />}
+        </div> : ""}
         confirmLabel={t("runs.start")}
         danger
-        busy={busy}
+        busy={busy || !canSubmit}
         onConfirm={() => void submit()}
-        onClose={() => setConfirm(false)}
+        onClose={() => { if (!busy) setConfirm(false); }}
       />
     </>
   );
@@ -462,6 +503,9 @@ function RunDetail({ id }: { id: string }) {
   const [stop, setStop] = useState(false);
   if (!r.data) return r.error ? <Alert tone="error">{r.error}</Alert> : <Spin />;
   const run: RunView = r.data;
+  // Only legacy missing keys default to sync; explicit null/unknown values are invalid.
+  const trainingMode = Object.hasOwn(run.spec, "training_mode") ? run.spec.training_mode : "sync";
+  const modeValid = trainingMode === "sync" || trainingMode === "colocate_async";
   const s = run.summary;
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -497,6 +541,8 @@ function RunDetail({ id }: { id: string }) {
           <Kpi label={t("runs.bestVal")} value={num(s.best_val_reward, 3)} sub={s.best_step !== null && s.best_step !== undefined ? t("runs.atStep", { s: s.best_step }) : undefined} />
           <Kpi label={t("runs.cost")} value={money(run.est_cost_usd)} sub={`${num(run.node_hours)} ${t("runs.nodeHours")} · ${duration(run.started_at, run.ended_at)}`} />
         </div>
+        {!modeValid && <Alert tone="error">{t("apiErrors.run.invalid_training_mode")}</Alert>}
+        {trainingMode === "colocate_async" && <AsyncTrainingNote />}
         {run.error && <Alert tone="error">{run.error}</Alert>}
         {run.job && <JobPanel jobId={run.job.id} onDone={() => r.reload()} />}
         <SubTabs
@@ -562,6 +608,7 @@ function RunDetail({ id }: { id: string }) {
               items={[
                 { label: t("runs.model"), value: <span className="tp-mono">{run.model_id}</span> },
                 { label: t("runs.strategy"), value: <Tag tone="blue">{t(`strategy.${run.spec.plan.strategy}`)}</Tag> },
+                { label: t("runs.trainingMode"), value: t(trainingModeLabel(trainingMode)) },
                 { label: t("runs.compute"), value: `${run.compute.nodes} × ml.${run.compute.instance_type} · ${run.compute.instance_group}` },
                 { label: t("runs.computeSource"), value: t(`runs.source_${run.compute.provider ?? "hyperpod"}`) },
                 { label: t("clusters.capacity"), value: run.compute.training_plan_arn ? <span className="tp-mono">{run.compute.training_plan_arn.split("/").pop()}</span> : t(`clusters.capacity_${run.compute.capacity ?? "on_demand"}`) },

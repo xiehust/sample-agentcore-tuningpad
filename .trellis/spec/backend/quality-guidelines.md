@@ -110,9 +110,23 @@ for additional operational constraints:
   must remain explicit before GPU scale-up. Never provision billable capacity for tests.
 - `services/components.py:guardian_cronjob()` and `cluster_assets/guardian.py` are the
   independent idle/budget backstop; do not make protection depend only on the backend.
-- `services/runs.py:render()` translates a supplied `compute.max_hours` into seconds for
-  `render/train.py:rayjob()`'s `activeDeadlineSeconds`. It is currently conditional on
-  a configured limit, not unconditional; preserve this enforcement when a limit is set.
+- `services/runs.py:validate_training_contract(spec, compute)` requires finite
+  `0 < compute.max_hours <= 720` and `int(max_hours * 3600) >= 1` for `colocate_async`,
+  before persistence/image/capacity work and again in `render()`. The resulting RayJob
+  must have positive integer `activeDeadlineSeconds`; this bounds an attempt, not the
+  whole Run, retries or bill. Sync/missing legacy mode retains nullable hours semantics.
+- `routers/runs.py:CreateRun.training_mode` is top-level `sync | colocate_async`,
+  default `sync`; preview echoes it and new `Run.spec` stores it. Only a **missing** old
+  spec key falls back, not null/invalid values. Do not inject it through params/plan.
+  `render/train.py` maps to `agentcore_sync | agentcore_colocate_async`; async uses native
+  `+trainer.v1.colocate_async.parameter_sync_step=1`, warmup=1, staleness=8/drop.
+  Both modes require strict positive integer B/m with B%m=0 (missing/null mini inherits B)
+  and final profile/strategy pairing. Request enum/range errors are 422 `request.invalid`;
+  persisted-mode, batch, deadline and plan errors use `run.invalid_training_mode`,
+  `run.invalid_batch`, `run.async_deadline_required`, `run.bad_plan_override` (400).
+  `tests/test_runs.py` pins round trips, no-side-effect rejection, 1-second deadlines
+  and mode retention through retry/restart. Keep real fixed-SDK Hydra/registry CPU
+  checks distinct from separately authorized GPU scheduling/training/recovery proof.
 - `core/auth.py:validate_startup()` and `AuthMiddleware` prevent unauthenticated remote
   access; preserve the loopback-only default without `TUNINGPAD_PASSWORD`.
 - `services/components.py:ensure_security_groups()` restricts gateway 18765 and vLLM
@@ -121,6 +135,50 @@ for additional operational constraints:
   `services/components.py:irsa_trust()` scopes trust to the service-account subject
   and STS audience; retain workload/guardian policy scoping as well.
 - Never commit `config/tuningpad.yaml`, `data/`, or `.run/`.
+
+## Scenario: single-node Ray / TransferQueue CPU admission
+
+### 1. Scope / Trigger
+When changing V1 framework resources or supporting a small training instance, verify
+Ray admission separately from Hydra composition. verl 0.9 enables TQ for both modes.
+
+### 2. Signatures
+`render/train.py:_pod_cpus(spec) -> int` owns the existing Pod CPU quantity;
+`overrides(..., spec, nodes, training_mode)` consumes it without increasing resources.
+
+### 3. Contracts
+Pod CPU remains `max(4, spec.vcpus - 8)`. For one node, storage units are
+`min(8, max(1, pod_cpu - 3 * spec.gpus - 1 - 2))`; emit
+`transfer_queue.backend.SimpleStorage.num_data_storage_units` only when below 8.
+The subtractions reserve the training PG (3/GPU), TQ controller (1), and admission/spare
+capacity (2). Plain remote actors require a CPU for admission but do not hold it;
+actors inside a PG are not an additional reservation outside that PG. Roomy and
+multi-node defaults are unchanged. This is internal rendering, not a user knob.
+
+### 4. Validation / Failure Matrix
+A valid Hydra config can still leave TQ's upstream `ray.get(pg.ready())` waiting for
+resources. Keep the Run deadline and independent bounded cloud supervision; do not
+inflate Ray's advertised CPUs above the Pod limit to conceal an infeasible budget.
+The formula is checked against current catalog shapes, not a guarantee for arbitrary
+future CPU/GPU ratios; new shapes require admission tests.
+
+### 5. Good / Base / Bad Cases
+Good: p5.4 keeps 8 CPUs and one GPU; 2 storage + 1 controller + 3 training PG leaves 2.
+Base: p5.48 and multi-node keep upstream 8 storage units.
+Bad: default 8 storage + 1 controller already cannot fit the p5.4 8-CPU Pod.
+
+### 6. Tests Required
+`test_runs.py:test_transfer_queue_cpu_budget_preserves_resources` covers mode/shape
+and unchanged manifests. See the task's `cpu_scheduling.py` and
+`cpu-scheduling-report.md` under `10-12-verl-colocate-async`: exact-version Hydra,
+original pending admission, and repaired actual TQ bootstrap with synthetic training
+resource shapes. Use an owned local Ray namespace, deadlines and shutdown; never
+connect to or stop a shared cluster. Synthetic accelerator markers are not GPU proof.
+
+### 7. Wrong vs Correct
+Wrong: declare real training passed because configuration parsing/registry construction
+passed. Correct: separately prove resource admission, then obtain authorized GPU
+optimizer/checkpoint evidence; mark cloud-capacity failure BLOCKED and verify cleanup.
 
 ## Common mistakes and review checklist
 

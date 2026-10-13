@@ -1,6 +1,6 @@
 """Render a training run into Kubernetes objects.
 
-Layers (later wins): FIXED (agentcore_sync contract) → strategy defaults
+Layers (later wins): FIXED (AgentCore V1 contract) → training mode → strategy defaults
 (FSDP / Megatron, from the toolkit's verified scripts) → planner output →
 user parameters. Output: Hydra overrides for `python -m verl.trainer.main_ppo`,
 the agent-loop YAML, the in-pod entry script, and the RayJob manifest.
@@ -16,11 +16,55 @@ from __future__ import annotations
 
 import json
 import shlex
-from typing import Any
+from typing import Any, Literal, cast
 
 import yaml
 
 from ..catalog.instances import InstanceSpec
+from ..core.errors import AppError
+
+TrainingMode = Literal["sync", "colocate_async"]
+TRAINER_MODES = {"sync": "agentcore_sync", "colocate_async": "agentcore_colocate_async"}
+
+
+def training_mode(value: Any) -> TrainingMode:
+    """Only callers reading a missing legacy spec key may supply the sync default."""
+    if not isinstance(value, str) or value not in TRAINER_MODES:
+        raise AppError("run.invalid_training_mode", "training_mode must be sync or colocate_async")
+    return cast(TrainingMode, value)
+
+
+def mini_batch_size(params: dict[str, Any]) -> int:
+    """Toolkit variable-row batching fixes the partition count B/m, not row count."""
+    batch = params.get("train_batch_size")
+    mini = params.get("ppo_mini_batch_size")
+    if mini is None:
+        mini = batch
+    if type(batch) is not int or type(mini) is not int or batch <= 0 or mini <= 0:
+        raise AppError("run.invalid_batch", "train and mini batch sizes must be positive integers")
+    if batch % mini:
+        raise AppError(
+            "run.invalid_batch", "train_batch_size must be divisible by ppo_mini_batch_size"
+        )
+    return mini
+
+
+def validate_training_contract(
+    mode: Any, plan: dict[str, Any], params: dict[str, Any]
+) -> TrainingMode:
+    """Pure contract shared by API/preflight and the low-level renderer."""
+    mode = training_mode(mode)
+    profile, strategy = plan.get("profile"), plan.get("strategy")
+    if profile not in ("fsdp", "megatron") or strategy not in (
+        f"{profile}_full",
+        f"{profile}_lora",
+    ):
+        raise AppError(
+            "run.bad_plan_override", "plan profile and strategy must be a supported pair"
+        )
+    mini_batch_size(params)
+    return mode
+
 
 GATEWAY_PORT = 18765
 # Must match the trainer image (toolkit uv.lock pins ray 2.56.0).
@@ -110,19 +154,18 @@ PARAM_BOUNDS = {
 
 
 def merge_params(user: dict[str, Any] | None) -> dict[str, Any]:
-    from ..core.errors import AppError
-
     out = dict(DEFAULT_PARAMS)
     for k, v in (user or {}).items():
         if k not in DEFAULT_PARAMS:
             raise AppError("run.unknown_param", f"unknown training parameter {k}")
-        if v is None:
-            continue
-        if k in PARAM_BOUNDS:
+        if v is not None:
+            out[k] = v
+    mini_batch_size(out)
+    for k, v in out.items():
+        if v is not None and k in PARAM_BOUNDS:
             lo, hi = PARAM_BOUNDS[k]
             if not lo <= float(v) <= hi:
                 raise AppError("run.param_out_of_range", f"{k}={v} outside [{lo}, {hi}]")
-        out[k] = v
     if out["max_prompt_length"] > out["max_model_len"]:
         raise AppError("run.bad_lengths", "max_prompt_length must be ≤ max_model_len")
     return out
@@ -134,6 +177,10 @@ def _fmt(v: Any) -> str:
     if isinstance(v, float):
         return repr(v) if abs(v) >= 1e-3 or v == 0 else f"{v:.0e}"
     return str(v)
+
+
+def _pod_cpus(spec: InstanceSpec) -> int:
+    return max(4, spec.vcpus - 8)
 
 
 def overrides(
@@ -149,12 +196,36 @@ def overrides(
     project: str,
     experiment: str,
     agent_loop: dict[str, Any] | None = None,
+    training_mode: TrainingMode = "sync",
 ) -> list[str]:
     p = params
+    mode = validate_training_contract(training_mode, plan, p)
     profile = plan["profile"]
     lora = plan["strategy"].endswith("lora")
-    mini = p["ppo_mini_batch_size"] or p["train_batch_size"]
+    mini = mini_batch_size(p)
     o: dict[str, Any] = dict(FIXED)
+    o["trainer.v1.trainer_mode"] = TRAINER_MODES[mode]
+    if nodes == 1:
+        # verl 0.9 V1 always starts TQ: 1 CPU/controller + 1 CPU/storage unit.
+        # Its training PG reserves 3 CPUs/GPU (including the hybrid rollout/ref).
+        # TaskRunner, agent/reward loops, vLLM server and load balancer use Ray's
+        # default actors: 1 CPU for admission, 0 held. Leave 2 CPUs outside PGs
+        # for their admission plus spare capacity, not 1 CPU per running actor.
+        # p5.4: 8 - 3 - 1 - 2 = 2 units. Keep the upstream 8 on roomy/multi-node runs.
+        storage_units = min(8, max(1, _pod_cpus(spec) - 3 * spec.gpus - 1 - 2))
+        if storage_units < 8:
+            o["transfer_queue.backend.SimpleStorage.num_data_storage_units"] = storage_units
+    if mode == "colocate_async":
+        # Toolkit normalizes its registry alias to the native verl config subtree.
+        # parameter_sync_step is absent from verl 0.9's colocate_async YAML: use +.
+        o.update(
+            {
+                "trainer.v1.colocate_async.num_warmup_batches": 1,
+                "trainer.v1.sampler.max_off_policy_threshold": 8,
+                "trainer.v1.sampler.max_off_policy_strategy": "drop",
+                "+trainer.v1.colocate_async.parameter_sync_step": 1,
+            }
+        )
     o.update(
         {
             "data.train_files": f"['{train_file}']",
@@ -428,7 +499,7 @@ def rayjob(
     }
     gpu_res: dict[str, Any] = {
         "nvidia.com/gpu": spec.gpus,
-        "cpu": str(max(4, spec.vcpus - 8)),
+        "cpu": str(_pod_cpus(spec)),
         "memory": f"{int(spec.mem_gib * 0.85)}Gi",
     }
     if multi and spec.efa:
