@@ -304,3 +304,44 @@ Split the mixed working tree by file/hunk: committed only toolkit-git-source cha
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Merge toolkit test-isolation PR and archive subtask
+<!-- trellis-session: v=2 fp=54359fbbf40f878e -->
+
+**Date**: 2026-10-13
+**Task**: Merge toolkit test-isolation PR and archive subtask
+**Branch**: `main`
+
+### Summary
+
+确认现有4个任务的本地工作都已完成。toolkit 修复 99ab5d7 在最新 main(40ee401) 上本地合并验证：没有 AWS 凭证，目标21个测试和全量515 passed/20 skipped，pinned ruff 0.1.5 通过。开 PR #4，经用户授权合并为 123e297，删掉了远端和本地的 fix/rollout-test-isolation 分支（删除前确认已在 origin/main 中），本地 toolkit main 快进到 123e297，用户的 .mcp.json 改动没动。修正子任务 branch 元数据后，归档 10-10-toolkit-test-isolation，同时更新父任务 R1b 的记录。.gitignore 新增 .playwright-cli/、/.codegraph/、/.playwright/、/.claude/skills/playwright-cli/。用户确认后把 TuningPad main 的11个提交（含之前会话的 634b80c、534eec1）推送到 origin。没有任何 AWS/GPU 操作。
+
+### Main Changes
+
+- toolkit PR #4 合并（123e297），删除分支 fix/rollout-test-isolation
+- 归档 10-10-toolkit-test-isolation；更新父任务 10-10-project-wrap-up 的 R1b 记录
+- .gitignore 忽略本地工具目录
+- TuningPad main 推送 f7c2b94..a5f9b79
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d971ea7` | chore: ignore playwright-cli output and record toolkit PR #4 |
+| `86260cb` | chore(task): archive 10-10-toolkit-test-isolation |
+| `a5f9b79` | chore: ignore local tooling dirs and record toolkit PR #4 merge |
+| `123e297` | Merge pull request #4 from xiehust/fix/rollout-test-isolation (agentcore-rl-toolkit) |
+
+### Testing
+
+- [OK] toolkit 合并后：pytest tests/test_rollout_entrypoint.py 21 passed；pytest tests/ 515 passed, 20 skipped；ruff 0.1.5 check/format 通过（没有 AWS 凭证）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- colocate_async AC5/AC6 与 rollout-failure-policy AC5 需要一次真实 GPU 训练，等用户定预算/区域/机型（上次 us-east-2 p5.4xlarge 容量不足）
+- project-wrap-up：Megatron V4、HyperPod 原生实例组、ADOT 冷启动未验证；rl-dev-2/rl-dev-ue-1 集群的去留待决定

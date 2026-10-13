@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~306 | Active |
+| `journal-1.md` | ~347 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-10-13 | Merge toolkit test-isolation PR and archive subtask | `d971ea7`, `86260cb`, `a5f9b79`, `123e297` | `main` |
 | 10 | 2026-10-13 | Commit pinned Git toolkit source | `634b80c` | `main` |
 | 9 | 2026-10-13 | Finish Chinese core-logic HTML guide | `3402e16` | `main` |
 | 8 | 2026-10-10 | Adopt OfficeBench images without model invocation | Runtime deployment record in task | `main` |
