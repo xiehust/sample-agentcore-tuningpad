@@ -12,3 +12,5 @@ dist/
 /.run/
 /data/
 /config/tuningpad.yaml
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
