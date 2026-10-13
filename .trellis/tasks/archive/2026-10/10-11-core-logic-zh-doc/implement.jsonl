@@ -1,0 +1,10 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Source ownership, app lifecycle, router/pipeline registration and non-console asset/toolkit boundaries."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Ledger entities, JSON persistence, nullable schema upgrades and absence of tenant isolation."}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Recovery, cleanup, GPU and AgentCore operational contracts; historical observations must not be presented as this task's verification."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Separate Job byte-offset logs from S3 training logs and preserve secret-handling limits."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Mandatory make verify, hermetic fixtures and no live cloud actions or weakened safety controls."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Actual useLoad/usePoll/useJob snapshot, transition and race contracts for frontend flow documentation."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Local drafts, URL identity and inherited defaults versus explicit overrides."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Actual frontend validation limits and mock-only browser safety; static document is outside the console build."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace request, persistence, external execution and display across boundaries without inventing guarantees."}
+{"file":".trellis/tasks/10-11-core-logic-zh-doc/research.md","reason":"Chinese source-backed consolidated research, checked state-machine branches, source anchors and explicit unverified boundaries."}

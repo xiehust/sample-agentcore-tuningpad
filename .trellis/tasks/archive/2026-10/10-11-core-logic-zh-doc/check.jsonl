@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check make verify evidence, hermetic/no-cloud scope and preservation of cost/security boundaries without expanding into business fixes."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Independently verify Run/Job separation, logical target links, JSON/session semantics and ledger limitations."}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Review cleanup/recovery/AgentCore/EFA assertions against source; do not treat historical run notes as current verification."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Check byte offsets, checkpoint/log claims and that documentation contains no real sensitive runtime content."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Validate polling cadence and onDone transition limits instead of describing a push bus/shared cache."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Separate HTML/browser acceptance from TypeScript/Vite and nonexistent frontend test-runner coverage."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Independently trace critical cross-layer claims to writers/readers rather than trusting the prose or diagrams."}
+{"file":".trellis/tasks/10-11-core-logic-zh-doc/research.md","reason":"Evidence map and caveats to cross-check directly in source, including optional deadline, Run resume and imported-cluster cleanup side effects."}
