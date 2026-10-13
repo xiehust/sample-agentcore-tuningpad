@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"Router/service/pipeline boundaries and implementation checklist"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Run JSON persistence, missing-field compatibility, no schema migration"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Stable request/domain errors and bilingual localization"}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Idempotence, cost guardrails, LoRA config and checkpoint limits"}
+{"file":".trellis/spec/frontend/index.md","reason":"V2 UI and centralized typed API contracts"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Separate mode state from presets and inherited numeric defaults"}
+{"file":".trellis/tasks/10-12-verl-colocate-async/research.md","reason":"Pinned Toolkit/verl contracts, report reconciliation and validation evidence"}

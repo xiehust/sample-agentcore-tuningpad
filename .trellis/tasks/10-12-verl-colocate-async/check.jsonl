@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Hermetic test factories, mandatory make verify and cost/security regressions"}
+{"file":".trellis/spec/backend/aws-k8s-operations.md","reason":"Real Hydra compose, GPU lifecycle, LoRA and recovery review"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Strict i18n and bilingual mock-only browser evidence"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Optional old spec versus invalid values and typed request contracts"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Validate UI/API/storage/render round-trip and retry boundaries"}
+{"file":".trellis/tasks/10-12-verl-colocate-async/research.md","reason":"Verify actual trainer semantics, sync-only guard and fixed-version checkpoint limits"}
