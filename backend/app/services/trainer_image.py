@@ -8,8 +8,6 @@ Images are keyed by (region, profile, toolkit revision).
 
 from __future__ import annotations
 
-import hashlib
-import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -18,8 +16,9 @@ from typing import Any
 from botocore.exceptions import ClientError
 
 from ..core import aws
-from ..core.config import REPO_ROOT, get_settings
+from ..core.config import REPO_ROOT
 from ..core.errors import AppError
+from . import toolkit_source
 
 PROJECT = "tuningpad-trainer-build"
 LOG_GROUP = "/aws/codebuild/tuningpad-trainer"
@@ -28,21 +27,8 @@ PROFILES = ("fsdp", "megatron")
 
 
 def toolkit_revision() -> str:
-    """Short commit + a content hash of uncommitted changes (so edits rebuild)."""
-    tk = get_settings().toolkit_path
-
-    def git(*args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=tk, capture_output=True, text=True, timeout=60
-        ).stdout.strip()
-
-    head = git("rev-parse", "--short=10", "HEAD")
-    if not head:
-        raise AppError("trainer.toolkit_not_git", f"{tk} is not a git checkout")
-    diff = git("status", "--porcelain") + git("diff", "HEAD")
-    if diff:
-        return f"{head}-d{hashlib.sha256(diff.encode()).hexdigest()[:8]}"
-    return head
+    """Authoritative full Git SHA; image selection does not acquire source."""
+    return toolkit_source.source_spec()[1]
 
 
 def image_tag(profile: str, revision: str) -> str:
@@ -51,30 +37,23 @@ def image_tag(profile: str, revision: str) -> str:
     return f"{profile}-{revision}"
 
 
-def package_source(dest: Path) -> Path:
-    tk = get_settings().toolkit_path
-    files = subprocess.run(
-        ["git", "ls-files", "-co", "--exclude-standard"],
-        cwd=tk,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    ).stdout.split("\n")
-    skip = (".venv/", "docs/site/", "dist/")
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in ("Dockerfile", "buildspec.yml"):
-            zf.write(BUILD_DIR / name, name)
-        for f in files:
-            if not f or f.startswith(skip) or not (tk / f).is_file():
-                continue
-            zf.write(tk / f, f"toolkit/{f}")
+def package_source(dest: Path, *, expected_revision: str) -> Path:
+    root, revision = toolkit_source.resolve_source(expected_revision=expected_revision)
+    with tempfile.TemporaryDirectory(prefix="tuningpad-trainer-source-") as d:
+        tk = toolkit_source.copy_tracked(root, Path(d) / "toolkit", expected_revision=revision)
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in ("Dockerfile", "buildspec.yml"):
+                zf.write(BUILD_DIR / name, name)
+            for f in sorted(tk.rglob("*")):
+                if f.is_file():
+                    zf.write(f, f"toolkit/{f.relative_to(tk).as_posix()}")
     return dest
 
 
 def upload_source(region: str, bucket: str, revision: str) -> str:
     key = f"build/trainer-src-{revision}.zip"
     with tempfile.TemporaryDirectory() as d:
-        z = package_source(Path(d) / "src.zip")
+        z = package_source(Path(d) / "src.zip", expected_revision=revision)
         aws.client("s3", region).upload_file(str(z), bucket, key)
     return f"{bucket}/{key}"
 

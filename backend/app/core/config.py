@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     agent_platform_version: str = "auto"
 
     # --- toolkit ---
-    toolkit_path: Path = REPO_ROOT.parent / "agentcore-rl-toolkit"
+    toolkit_path: Path | None = None  # optional clean checkout of the pinned Git revision
 
     # --- job engine ---
     max_concurrent_jobs: int = 12  # run monitors are long-lived

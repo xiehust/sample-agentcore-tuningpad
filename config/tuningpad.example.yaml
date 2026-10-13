@@ -2,6 +2,14 @@
 default_region: us-east-1        # HyperPod GPU "for cluster usage" quota lives here in this account
 # password: ""                   # set to enable login (required when binding a non-loopback host)
 # host: 127.0.0.1
-# toolkit_path: ../agentcore-rl-toolkit
+# Toolkit defaults to the Git URL + full SHA in backend/pyproject.toml (no sibling needed).
+# Source is fetched on first use into <data_dir>/cache/toolkit/<full_sha>, separate from uv's
+# install/build cache. A source-cache hit does not make uv sync or uv build network-free.
+# Optional local supply: a clean root checkout of that same repository and SHA only.
+# Dirty/different revisions and editable installs are not supported; invalid overrides fail
+# without fallback. Prefer an absolute path; TuningPad never repairs this checkout.
+# toolkit_path: /absolute/path/to/pinned-toolkit
+# This source change does not update existing cloud images/runtimes. Later user operations
+# may trigger the existing image build/deploy flow and its normal costs.
 # resource_tag: tuningpad        # Project tag value on every resource TuningPad creates
 # agent_platform_version: auto    # AgentCore Runtime: auto (V2 where offered) | V1 | V2

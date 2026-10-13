@@ -30,9 +30,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-# The toolkit is consumed from the sibling checkout (config.toolkit_path); the same
-# source tree is baked into agent and trainer images so all three stay in lockstep.
-agentcore-rl-toolkit = { path = "../../agentcore-rl-toolkit", editable = true }
+# This fixed Git source is authoritative for installation and toolkit source consumers.
+agentcore-rl-toolkit = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git", rev = "7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6" }
 
 [tool.uv]
 package = false

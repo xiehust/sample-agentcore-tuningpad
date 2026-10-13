@@ -1,6 +1,6 @@
-# TuningPad trainer image (linux/amd64): verl + agentcore-rl-toolkit from the platform's
-# checkout, installed with the toolkit's own uv.lock (`--frozen`) so the trainer, the
-# rollout gateway and the agents speak the same contract.
+# TuningPad trainer image (linux/amd64): verl + agentcore-rl-toolkit from tracked inputs
+# at the platform's pinned Git SHA (backend/pyproject.toml), not a sibling checkout.
+# The toolkit's own uv.lock (`--frozen`) installs the trainer/gateway dependencies.
 #   PROFILE=fsdp      uv sync --extra verl
 #   PROFILE=megatron  uv sync --extra verl --group verl-megatron  (+ megatron-bridge CP clamp)
 # CUDA 13 needs NVIDIA driver >= 580 (HyperPod EKS AMI ships 580.126.09).

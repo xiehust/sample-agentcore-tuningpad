@@ -15,7 +15,9 @@ from botocore.exceptions import ClientError
 from ..core import aws
 from ..core.config import get_settings
 from ..core.db import session_scope
+from ..core.errors import AppError
 from ..models import Project
+from . import toolkit_source
 
 PROJECT_ID = "default"
 AGENT_ECR_REPO = "tuningpad-agents"
@@ -55,8 +57,6 @@ def region_resources(region: str) -> dict[str, Any]:
 
 
 def require_region(region: str) -> dict[str, Any]:
-    from ..core.errors import AppError
-
     res = region_resources(region)
     if res.get("status") != "ready":
         raise AppError(
@@ -196,13 +196,19 @@ def preflight(region: str) -> dict[str, Any]:
         "docker available" if docker else "docker missing: agent images cannot be built locally",
     )
 
-    toolkit = get_settings().toolkit_path
-    ok = (toolkit / "pyproject.toml").is_file()
-    add(
-        "toolkit",
-        "ok" if ok else "fail",
-        f"agentcore-rl-toolkit at {toolkit}" + ("" if ok else " not found"),
-    )
+    try:
+        toolkit, present, error = toolkit_source.inspect_source()
+        if error:
+            raise error
+        add(
+            "toolkit",
+            "ok" if present else "warn",
+            f"Verified toolkit source at {toolkit}"
+            if present
+            else f"Toolkit source not cached at {toolkit}; fetched on first use",
+        )
+    except AppError as error:
+        add("toolkit", "fail", error.message, error.detail)
 
     result = {
         "region": region,

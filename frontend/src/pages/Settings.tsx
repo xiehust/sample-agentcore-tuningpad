@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { JobPanel } from "../components/JobPanel";
 import { StatusTag } from "../components/StatusTag";
-import { errorMessage, setupApi, type Preflight } from "../lib/api";
+import { errorMessage, setupApi, type Check, type Preflight } from "../lib/api";
 import { regionOptions } from "../lib/regions";
 import { useLoad, useV2Toast } from "../v2/hooks";
 import { Alert, Button, Card, Descriptions, Field, PageHeader, Select, Spin, Table } from "../v2/ui";
@@ -46,6 +46,26 @@ export default function SettingsPage() {
 
   const checks = preflight?.checks ?? (setup.data?.last_preflight.region === current ? setup.data?.last_preflight.checks : undefined);
 
+  const checkMessage = (check: Check) => {
+    if (check.id !== "toolkit") return check.message;
+    const summary = check.status === "ok"
+      ? t("settings.toolkitVerified")
+      : check.status === "warn"
+        ? t("settings.toolkitNotCached")
+        : t("settings.toolkitFailed");
+    const detail = check.detail;
+    const reason = detail && typeof detail === "object" && "reason" in detail && typeof detail.reason === "string"
+      ? detail.reason : null;
+    // Retain the backend diagnostic (including paths) verbatim; never parse it for i18n.
+    return (
+      <div>
+        <div>{summary}</div>
+        {check.message !== summary && <div className="v2-muted">{check.message}</div>}
+        {reason && <code className="tp-mono">{reason}</code>}
+      </div>
+    );
+  };
+
   return (
     <>
       <PageHeader title={t("pages.settings.title")} desc={t("pages.settings.desc")} />
@@ -80,7 +100,7 @@ export default function SettingsPage() {
                 columns={[
                   { key: "s", title: t("common.status"), width: 110, render: (c) => <StatusTag status={c.status} /> },
                   { key: "id", title: t("settings.check"), width: 160, render: (c) => <code className="tp-mono">{c.id}</code> },
-                  { key: "m", title: t("common.detail"), render: (c) => c.message },
+                  { key: "m", title: t("common.detail"), render: checkMessage },
                 ]}
               />
             ) : (

@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..core.errors import AppError
+from ..services import toolkit_source
 
 # Tool-call parser / reasoning parser per schema, for vLLM serving.
 VLLM_PARSERS: dict[str, dict[str, str | None]] = {
@@ -89,6 +90,7 @@ def _estimate_active(params: int | None, experts: int | None, per_tok: int | Non
 def schema_for_template(template: str | None) -> str | None:
     if not template:
         return None
+    toolkit_source.validate_installation()
     from agentcore_rl_toolkit.rollout_gateway.response_schemas import _TEMPLATE_HASHES
 
     return _TEMPLATE_HASHES.get(hashlib.sha256(template.encode("utf-8")).hexdigest())

@@ -31,8 +31,7 @@ def test_template_params_validation():
         resolve_params("gsm8k_math", {"system_prompt": "  "})
 
 
-def test_template_context_contains_config_and_toolkit_files(monkeypatch, tmp_path):
-    monkeypatch.setattr(svc, "toolkit_wheel", lambda dest: (dest / "dist").mkdir() or dest)
+def test_template_context_contains_config_and_toolkit_files(toolkit_repo, stub_toolkit_build):
     agent = {
         "id": "ag-1",
         "source": "template",
@@ -85,17 +84,12 @@ def test_snapshot_unsafe_import_time_calls_are_flagged(tmp_path):
     assert sum("Runtime V2" in x for x in w) == 3 and any(x.startswith("app.py:2:") for x in w)
 
 
-def test_templates_are_snapshot_safe():
-    """The shipped templates deploy on V2 by default: no import-time unsafe calls."""
-    from app.core.config import get_settings
-    from app.templates_lib import get_template, template_dir
+def test_template_overlays_are_snapshot_safe():
+    """Check shipped overlays, not a user's sibling or synthetic upstream fixture."""
+    from app.templates_lib import template_dir
 
     for tid in ("gsm8k_math", "officebench"):
-        t = get_template(tid)
-        files = list(template_dir(tid).glob("agent/*.py"))
-        tk = get_settings().toolkit_path / t["toolkit_dir"]
-        files += [tk / f for f in t.get("toolkit_files", []) if f.endswith(".py")]
-        for f in files:
+        for f in template_dir(tid).glob("agent/*.py"):
             assert svc.snapshot_unsafe_calls(f.read_text()) == [], f
 
 

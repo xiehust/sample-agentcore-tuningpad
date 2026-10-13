@@ -75,7 +75,7 @@ def stage_source(ctx: StageContext) -> None:
     t = _load(ctx.target_id)
     res = proj.require_region(t["region"])
     _save(t["id"], status="building")
-    loc = ti.upload_source(t["region"], res["bucket"], t["toolkit_sha"])
+    loc = ti.upload_source(t["region"], res["bucket"], revision=t["toolkit_sha"])
     ti.ensure_project(t["region"], res["codebuild_role_arn"], loc)
     ctx.set("source", loc)
     ctx.log(f"source s3://{loc}")

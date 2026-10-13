@@ -1,6 +1,6 @@
 # TuningPad
 
-TuningPad is a no-code web console for agentic reinforcement learning on AWS. It trains agents built on [agentcore-rl-toolkit](../agentcore-rl-toolkit) on SageMaker HyperPod (EKS), using verl GRPO. Rollouts run on Bedrock AgentCore Runtime. The same cluster is also used to export checkpoints, serve models with vLLM, and evaluate them. The UI follows the V2 style of [sample-agentcore-launchpad](../sample-agentcore-launchpad).
+TuningPad is a no-code web console for agentic reinforcement learning on AWS. It trains agents built on [agentcore-rl-toolkit](https://github.com/xiehust/agentcore-rl-toolkit) on SageMaker HyperPod (EKS), using verl GRPO. Rollouts run on Bedrock AgentCore Runtime. The same cluster is also used to export checkpoints, serve models with vLLM, and evaluate them. The UI follows the V2 style of [sample-agentcore-launchpad](../sample-agentcore-launchpad).
 
 ```
 Console (React) ─► FastAPI control plane (this host) ─► CloudFormation · SageMaker HyperPod · EKS · AgentCore · S3 · ECR · CodeBuild
@@ -34,7 +34,7 @@ Prerequisites:
 - Node ≥ 20
 - Docker with buildx (an arm64 host builds agent images natively)
 - AWS credentials for the target account
-- The toolkit checked out at `../agentcore-rl-toolkit`
+- Git and network access to the pinned toolkit source/package index when the relevant caches are cold (no sibling checkout required)
 
 ```bash
 make install
@@ -46,6 +46,48 @@ make verify           # ruff + pytest + eslint + tsc/vite build + i18n parity
 Configuration goes in `config/tuningpad.yaml` (see `config/tuningpad.example.yaml`) or in `TUNINGPAD_*` environment variables. Without `TUNINGPAD_PASSWORD`, the console only serves loopback clients. Set a password before binding a non-loopback host.
 
 `helm` and `kubectl` are downloaded on demand into `data/bin`, pinned to a version and verified by sha256.
+
+## Toolkit source and caches
+
+The single source declaration is `backend/pyproject.toml`: Git URL
+`https://github.com/xiehust/agentcore-rl-toolkit.git` at full commit
+`7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6` (toolkit 0.1.5).
+`backend/uv.lock` records that pin; from `backend/`, `uv sync --locked` verifies the
+locked installation. No sibling checkout is required or searched automatically;
+installation is not editable.
+
+There are two separate caches:
+- **uv's installation/build cache** supplies the installed Python package and build
+  dependencies. Installation may access GitHub/package indexes.
+- **TuningPad's source cache**, `<data_dir>/cache/toolkit/<full_sha>/`, supplies tracked
+  repository inputs for Agent wheels/templates, Trainer contexts and the OfficeBench
+  helper. It is fetched only on first actual use; a valid cache is reused without
+  fetching source. Imports, health, meta and the toolkit preflight check do not download
+  it. A cold cache is a warning, not proof that the network is unavailable. Other
+  project preflight checks retain their existing AWS/ledger behavior.
+
+A warm source cache **does not guarantee an offline build**: `uv build` runs in a private
+copy and may still need build dependencies (such as hatchling) from the network. Offline
+operation requires the relevant uv caches as well. A cold-cache fetch failure is explicit;
+there is no sibling fallback. Invalid caches are reported, not silently replaced.
+
+`toolkit_path` is optional and unset by default. If explicitly set (including via
+`TUNINGPAD_TOOLKIT_PATH`), it must identify a clean checkout root of the **same repository
+and exact SHA**, with the required tracked inputs and safe internal links. Prefer an
+absolute path; relative paths are interpreted from the backend process's working directory.
+Staged/unstaged changes, non-ignored untracked files, a different revision, or an invalid
+origin are rejected even if the default cache is valid. Ignored build residue is not
+packaged. TuningPad never checks out, resets or cleans this user directory.
+**Dirty development trees and editable installs no longer satisfy this contract.** An
+existing local checkout need not be moved or deleted; correct or remove an obsolete
+`toolkit_path` setting yourself. Real configuration is not migrated automatically.
+
+This change does not update existing cloud images or AgentCore runtimes, nor prevent
+existing runtimes from being used. Later user-requested operations may enter the existing
+image build/deploy flow and incur its normal costs. New Trainer records/tags use the full
+SHA rather than old short/dirty identifiers. This is not a recipe digest: changing a
+Dockerfile alone still does not force a new tag, and pinning toolkit source does not pin
+base images or all build/data dependencies.
 
 ## Layout
 

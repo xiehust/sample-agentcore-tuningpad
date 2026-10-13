@@ -14,7 +14,9 @@ import json
 import random
 import re
 import subprocess
+import tempfile
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ import pandas as pd
 from ..core import aws
 from ..core.config import get_settings
 from ..core.errors import AppError
+from . import toolkit_source
 
 MAX_ROWS = 2_000_000
 SAMPLE_ROWS = 20
@@ -186,14 +189,19 @@ def gsm8k_rows() -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+@contextmanager
 def _toolkit_module(rel: str, name: str):
-    path = get_settings().toolkit_path / rel
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise AppError("dataset.toolkit_missing", f"{path} not found")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Keep helper imports and their pycache in a tracked private snapshot."""
+    root, revision = toolkit_source.resolve_source()
+    with tempfile.TemporaryDirectory(prefix="tuningpad-toolkit-helper-") as d:
+        private = toolkit_source.copy_tracked(root, Path(d) / "toolkit", expected_revision=revision)
+        path = private / rel
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise AppError("dataset.toolkit_missing", f"{path} not found")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        yield mod
 
 
 def officebench_checkout(ref: str = "main") -> Path:
@@ -226,43 +234,45 @@ def officebench_rows(
     """Upload tasks + testbeds to the platform bucket (toolkit preprocess.upload_task),
     then split by task directory, stratified by app-count category (1/2/3)."""
     repo = officebench_checkout()
-    pre = _toolkit_module("examples/strands_officebench_agent/preprocess.py", "ob_preprocess")
-    tasks_root = repo / "tasks"
-    task_ids = sorted(
-        (p.name for p in tasks_root.iterdir() if p.is_dir()),
-        key=lambda t: tuple(int(x) if x.isdigit() else 999 for x in t.split("-")),
-    )
-    if limit:
-        task_ids = task_ids[:limit]
-    prefix = f"datasets/{dataset_id}/officebench"
-    s3 = aws.client("s3", region)
-    entries = []
-    for n, task_id in enumerate(task_ids, 1):
-        count = pre.upload_task(s3, str(tasks_root / task_id), task_id, bucket, prefix)
-        sub_dir = tasks_root / task_id / "subtasks"
-        has_tb = any(
-            (tasks_root / task_id / d).is_dir() and any((tasks_root / task_id / d).iterdir())
-            for d in ("testbed", "reference")
+    with _toolkit_module(
+        "examples/strands_officebench_agent/preprocess.py", "ob_preprocess"
+    ) as pre:
+        tasks_root = repo / "tasks"
+        task_ids = sorted(
+            (p.name for p in tasks_root.iterdir() if p.is_dir()),
+            key=lambda t: tuple(int(x) if x.isdigit() else 999 for x in t.split("-")),
         )
-        for f in sorted(sub_dir.glob("*.json")) if count else []:
-            cfg = json.loads(f.read_text())
-            task_text = cfg.get("task")
-            if not isinstance(task_text, str):
-                continue
-            entries.append(
-                {
-                    "task_id": task_id,
-                    "payload": {
-                        "task_uri": f"s3://{bucket}/{prefix}/{task_id}/{f.stem}/config.json",
-                        "testbed_uri": f"s3://{bucket}/{prefix}/{task_id}/testbed.tar.gz"
-                        if has_tb
-                        else None,
-                    },
-                    "prompt": [{"role": "user", "content": task_text}],
-                }
+        if limit:
+            task_ids = task_ids[:limit]
+        prefix = f"datasets/{dataset_id}/officebench"
+        s3 = aws.client("s3", region)
+        entries = []
+        for n, task_id in enumerate(task_ids, 1):
+            count = pre.upload_task(s3, str(tasks_root / task_id), task_id, bucket, prefix)
+            sub_dir = tasks_root / task_id / "subtasks"
+            has_tb = any(
+                (tasks_root / task_id / d).is_dir() and any((tasks_root / task_id / d).iterdir())
+                for d in ("testbed", "reference")
             )
-        if n % 25 == 0:
-            log(f"uploaded {n}/{len(task_ids)} task dirs")
+            for f in sorted(sub_dir.glob("*.json")) if count else []:
+                cfg = json.loads(f.read_text())
+                task_text = cfg.get("task")
+                if not isinstance(task_text, str):
+                    continue
+                entries.append(
+                    {
+                        "task_id": task_id,
+                        "payload": {
+                            "task_uri": f"s3://{bucket}/{prefix}/{task_id}/{f.stem}/config.json",
+                            "testbed_uri": f"s3://{bucket}/{prefix}/{task_id}/testbed.tar.gz"
+                            if has_tb
+                            else None,
+                        },
+                        "prompt": [{"role": "user", "content": task_text}],
+                    }
+                )
+            if n % 25 == 0:
+                log(f"uploaded {n}/{len(task_ids)} task dirs")
     by_cat: dict[str, set[str]] = defaultdict(set)
     for e in entries:
         by_cat[e["task_id"].split("-")[0]].add(e["task_id"])

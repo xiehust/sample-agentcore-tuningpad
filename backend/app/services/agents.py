@@ -17,6 +17,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.request
 import zipfile
@@ -29,6 +30,7 @@ from ..core import aws
 from ..core.config import get_settings
 from ..core.errors import AppError
 from ..templates_lib import get_template, resolve_params, template_dir
+from . import toolkit_source
 
 ACR_IMAGE_LIMIT_BYTES = 2 * 1024**3
 SMOKE_MODEL = "openai.gpt-oss-20b-1:0"
@@ -55,18 +57,15 @@ def runtime_name(agent_name: str, suffix: str) -> str:
 # ---------------- context ----------------
 
 
-def toolkit_wheel(dest: Path) -> Path:
-    """Build the toolkit wheel from the configured checkout into dest/dist."""
-    tk = get_settings().toolkit_path
-    if not (tk / "pyproject.toml").is_file():
-        raise AppError("agent.toolkit_missing", f"agentcore-rl-toolkit not found at {tk}")
-    dist = dest / "dist"
+def toolkit_wheel(dest: Path, private_root: Path) -> Path:
+    """Build in prepare_context's tracked private snapshot, never in the source root."""
+    dist = dest.resolve() / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     for old in dist.glob("*.whl"):
         old.unlink()
     proc = subprocess.run(
         ["uv", "build", "--wheel", "-o", str(dist)],
-        cwd=tk,
+        cwd=private_root,
         capture_output=True,
         text=True,
         timeout=600,
@@ -107,13 +106,6 @@ def prepare_context(agent: dict[str, Any]) -> Path:
     ctx.mkdir(parents=True)
     if agent["source"] == "template":
         t = get_template(agent["template_id"])
-        tk = get_settings().toolkit_path / t["toolkit_dir"]
-        for f in t.get("toolkit_files", []):
-            shutil.copy2(tk / f, ctx / f)
-        for f in (template_dir(agent["template_id"]) / "agent").iterdir():
-            shutil.copy2(f, ctx / f.name)
-        params = resolve_params(agent["template_id"], agent["config"].get("params"))
-        (ctx / "tp_config.json").write_text(json.dumps(params, indent=2))
     elif agent["source"] == "upload":
         zip_path = uploads_dir() / f"{agent['id']}.zip"
         if not zip_path.exists():
@@ -121,7 +113,18 @@ def prepare_context(agent: dict[str, Any]) -> Path:
         safe_extract_zip(zip_path, ctx)
     else:
         raise AppError("agent.no_context", "image agents are not built")
-    toolkit_wheel(ctx)
+    root, revision = toolkit_source.resolve_source()
+    with tempfile.TemporaryDirectory(prefix="toolkit-", dir=ctx.parent) as d:
+        private = toolkit_source.copy_tracked(root, Path(d) / "toolkit", expected_revision=revision)
+        if agent["source"] == "template":
+            tk = private / t["toolkit_dir"]
+            for f in t.get("toolkit_files", []):
+                shutil.copy2(tk / f, ctx / f)
+            for f in (template_dir(agent["template_id"]) / "agent").iterdir():
+                shutil.copy2(f, ctx / f.name)
+            params = resolve_params(agent["template_id"], agent["config"].get("params"))
+            (ctx / "tp_config.json").write_text(json.dumps(params, indent=2))
+        toolkit_wheel(ctx, private)
     return ctx
 
 
@@ -557,6 +560,7 @@ def delete_runtime(region: str, runtime_id: str) -> None:
 
 def rollout_client(**kwargs):
     """Factory seam (tests patch this); RolloutClient creates its own boto3 clients."""
+    toolkit_source.validate_installation()
     from agentcore_rl_toolkit import RolloutClient
 
     return RolloutClient(**kwargs)

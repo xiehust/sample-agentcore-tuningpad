@@ -11,8 +11,11 @@
   (and npm install for the console). Use `uv run` for Python checks.
 - Published runtime/dev dependencies are pinned with exact `==` versions. Preserve
   those pins and the lockfile when changing dependencies. The deliberate exception is
-  `agentcore-rl-toolkit`, an editable path source at `../../agentcore-rl-toolkit` relative
-  to `backend/pyproject.toml`; do not replace it with an uncoordinated package release.
+  `agentcore-rl-toolkit`, pinned to the Git URL and full SHA in `backend/pyproject.toml`.
+  Regenerate `uv.lock` with uv and verify installation with `uv sync --locked`; do not
+  substitute a sibling/editable tree or an uncoordinated package release. Installation
+  and `uv build` may need their own uv cache/network even when the runtime source cache
+  is warm. See [source contracts](./directory-structure.md#pinned-toolkit-source-contracts).
 - Ruff enforces `E F I W UP B` with line length 100, plus `ruff format --check`.
   Existing E501 exceptions are `tests/**`, `app/render/train.py`, and
   `app/services/serving.py`. Do not broaden ignores to hide a new failure.
@@ -49,10 +52,12 @@ Do not start the application against operator credentials as a substitute for te
 
 `backend/tests/conftest.py:_isolated` is autouse. For every test it:
 
-- Sets a temporary `TUNINGPAD_DATA_DIR`, points `TUNINGPAD_CONFIG_FILE` to an absent file,
-  removes `TUNINGPAD_PASSWORD`, clears cached settings, and binds a temporary SQLite DB.
-- Installs AWS and K8s factories that raise on unexpected use. This blocks clients through
-  the factories, not arbitrary networking/subprocesses; explicitly stub other I/O too.
+- Clears inherited `TUNINGPAD_*`, sets temporary data/config paths, enables
+  `HF_HUB_OFFLINE=1`, clears cached settings, and binds a temporary SQLite DB.
+- Installs AWS and K8s factories that raise on unexpected use, and rejects real Git
+  fetch/clone and `uv build` through subprocess guards. Local Git fixtures and explicit
+  build stubs exercise toolkit consumers without a sibling. These guards are not a
+  general network sandbox; explicitly stub other I/O too.
 - Installs a two-worker `JobEngine`, then shuts it down and resets factories/settings
   at teardown. `client` uses `TestClient(create_app(start_background=False))`.
 

@@ -153,7 +153,7 @@ def _fake_hf(monkeypatch, tmp_path, files: dict[str, str], total=2_000_000_000):
     )
 
 
-def test_check_model_compatible_via_registry(monkeypatch, tmp_path):
+def test_check_model_compatible_via_registry(monkeypatch, tmp_path, toolkit_installation):
     template = "{% for m in messages %}{{ m.content }}{% endfor %}"
     digest = hashlib.sha256(template.encode()).hexdigest()
     from agentcore_rl_toolkit.rollout_gateway import response_schemas
@@ -171,7 +171,7 @@ def test_check_model_compatible_via_registry(monkeypatch, tmp_path):
     assert r.params_b == 2.0
 
 
-def test_check_model_incompatible_and_moe(monkeypatch, tmp_path):
+def test_check_model_incompatible_and_moe(monkeypatch, tmp_path, toolkit_installation):
     tc = {"chat_template": "unknown template"}
     cfg = {"num_local_experts": 32, "num_experts_per_tok": 4, "max_position_embeddings": 131072}
     _fake_hf(

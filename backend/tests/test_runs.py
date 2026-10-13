@@ -736,6 +736,24 @@ def test_log_endpoint_eof_counts_bytes(client, run_env, monkeypatch):
 def test_create_run_with_training_plan(client, run_env, monkeypatch):
     from app.routers import runs as rr
 
+    # This tests training-plan validation/costs, not live Hugging Face model discovery.
+    monkeypatch.setattr(
+        rr.models,
+        "check_model",
+        lambda model_id: rr.models.ModelCheck(
+            model_id=model_id,
+            compatible=True,
+            schema="qwen3_5",
+            reason=None,
+            template_source="chat_template.jinja",
+            params=2_270_000_000,
+            params_b=2.27,
+            is_moe=False,
+            num_experts=None,
+            active_params_b=None,
+            max_position_embeddings=32768,
+        ),
+    )
     calls = []
 
     def check(region, arn, itype, count, az_ids):

@@ -5,92 +5,12 @@ requires-python = ">=3.12"
 [[package]]
 name = "agentcore-rl-toolkit"
 version = "0.1.5"
-source = { editable = "../../agentcore-rl-toolkit" }
+source = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6#7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6" }
 dependencies = [
     { name = "bedrock-agentcore" },
     { name = "bedrock-agentcore-starter-toolkit" },
     { name = "boto3" },
     { name = "python-dotenv" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "a2a-sdk", extras = ["http-server"], marker = "extra == 'a2a-server'", specifier = ">=1.0.1,<2.0" },
-    { name = "agentcore-rl-toolkit", extras = ["a2a"], marker = "extra == 'dev'" },
-    { name = "agentcore-rl-toolkit", extras = ["a2a-server"], marker = "extra == 'a2a'" },
-    { name = "agentcore-rl-toolkit", extras = ["rollout"], marker = "extra == 'a2a'" },
-    { name = "agentcore-rl-toolkit", extras = ["rollout"], marker = "extra == 'dev'" },
-    { name = "aioboto3", marker = "extra == 'rollout'", specifier = ">=15.5.0" },
-    { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.9" },
-    { name = "aiohttp", marker = "extra == 'gateway'", specifier = ">=3.9" },
-    { name = "aiohttp", marker = "extra == 'rollout'", specifier = ">=3.9" },
-    { name = "aiohttp", marker = "extra == 'verl'", specifier = ">=3.9" },
-    { name = "backoff", marker = "extra == 'rollout'" },
-    { name = "bedrock-agentcore", specifier = ">=1.23.1" },
-    { name = "bedrock-agentcore-starter-toolkit", specifier = ">=0.2.0" },
-    { name = "boto3", specifier = ">=1.40.55" },
-    { name = "flash-attn", marker = "extra == 'verl'", specifier = "==2.8.3", index = "https://wheels.astral.sh/simple/cu130/" },
-    { name = "flash-linear-attention", marker = "extra == 'verl'", specifier = ">=0.5.2" },
-    { name = "httpx", marker = "extra == 'rollout'", specifier = ">=0.27.0" },
-    { name = "jmespath", marker = "extra == 'gateway'", specifier = ">=1.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "numpy", marker = "extra == 'verl'" },
-    { name = "openai", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "orjson", marker = "extra == 'verl'" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0" },
-    { name = "pydantic", marker = "extra == 'rollout'" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "qwen-vl-utils", marker = "extra == 'verl'" },
-    { name = "ray", marker = "extra == 'verl'" },
-    { name = "rllm", marker = "extra == 'rllm'", git = "https://github.com/rllm-org/rllm.git" },
-    { name = "rllm-model-gateway", marker = "extra == 'slime'", specifier = ">=0.1.0" },
-    { name = "tinker", marker = "extra == 'tinker-api'", specifier = "==0.30.1" },
-    { name = "tinker", marker = "extra == 'tinker-skyrl'", specifier = "==0.24.1" },
-    { name = "tokenizers", marker = "extra == 'dev'", specifier = ">=0.22.2" },
-    { name = "tokenizers", marker = "extra == 'gateway'", specifier = ">=0.22.2" },
-    { name = "torch", marker = "extra == 'verl'", specifier = ">=2.10.0" },
-    { name = "torchvision", marker = "extra == 'verl'", specifier = ">=0.23.0" },
-    { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.8" },
-    { name = "transformers", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "transformers", marker = "extra == 'gateway'", specifier = ">=5.0" },
-    { name = "transformers", marker = "extra == 'verl'", specifier = "==5.12.1" },
-    { name = "verl", marker = "extra == 'verl'", specifier = "==0.9.0" },
-    { name = "vllm", marker = "extra == 'verl'", specifier = "==0.24.0" },
-]
-provides-extras = ["dev", "gateway", "tinker-api", "tinker-skyrl", "rollout", "a2a-server", "a2a", "slime", "rllm", "verl"]
-
-[package.metadata.requires-dev]
-swe-agent = [
-    { name = "aws-bedrock-token-generator", specifier = ">=1.1.0" },
-    { name = "datasets" },
-    { name = "polars", specifier = ">=1.41.2" },
-    { name = "tqdm" },
-]
-verl-ci = [
-    { name = "aiohttp", specifier = ">=3.9" },
-    { name = "cachetools" },
-    { name = "fastapi" },
-    { name = "numpy" },
-    { name = "orjson" },
-    { name = "ray" },
-    { name = "torch", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
-    { name = "torchvision", specifier = ">=0.23.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
-    { name = "transferqueue", specifier = "==0.1.8" },
-    { name = "transformers", specifier = "==5.12.1" },
-    { name = "uvicorn" },
-    { name = "verl", specifier = "==0.9.0" },
-]
-verl-megatron = [
-    { name = "apex", marker = "python_full_version == '3.12.*'", index = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.11/simple/" },
-    { name = "megatron-bridge", marker = "python_full_version == '3.12.*'", specifier = "==0.5.0" },
-    { name = "megatron-core", marker = "python_full_version == '3.12.*'", specifier = "==0.18.0" },
-    { name = "nvidia-modelopt", marker = "python_full_version == '3.12.*'", specifier = ">=0.37.0" },
-    { name = "torch", marker = "python_full_version == '3.12.*'", specifier = "==2.11.0" },
-    { name = "transformer-engine", extras = ["pytorch"], marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
-    { name = "transformer-engine-cu13", marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
-    { name = "transformer-engine-torch", marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
 ]
 
 [[package]]
@@ -2281,7 +2201,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentcore-rl-toolkit", editable = "../../agentcore-rl-toolkit" },
+    { name = "agentcore-rl-toolkit", git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6" },
     { name = "aws-bedrock-token-generator", specifier = "==1.1.0" },
     { name = "boto3", specifier = "==1.43.83" },
     { name = "fastapi", specifier = "==0.139.0" },

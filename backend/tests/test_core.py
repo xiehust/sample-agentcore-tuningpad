@@ -9,7 +9,7 @@ def test_health_and_loopback_without_password(client):
     assert client.get("/api/auth/status").json() == {"auth_required": False, "authenticated": True}
 
 
-def test_password_flow(monkeypatch):
+def test_password_flow(monkeypatch, toolkit_installation):
     monkeypatch.setenv("TUNINGPAD_PASSWORD", "s3cret")
     reset_settings_cache()
     from fastapi.testclient import TestClient

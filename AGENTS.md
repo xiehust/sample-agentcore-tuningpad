@@ -1,6 +1,6 @@
 # AGENTS.md — TuningPad
 
-TuningPad is a no-code web console for agentic RL on AWS: a FastAPI control plane (`backend/`) plus a React console (`frontend/`) that drive CloudFormation, SageMaker HyperPod (EKS), Bedrock AgentCore, S3, ECR and CodeBuild. Training is verl GRPO as a RayJob; agents are built on the sibling checkout `../agentcore-rl-toolkit`. See `README.md` for the product workflow.
+TuningPad is a no-code web console for agentic RL on AWS: a FastAPI control plane (`backend/`) plus a React console (`frontend/`) that drive CloudFormation, SageMaker HyperPod (EKS), Bedrock AgentCore, S3, ECR and CodeBuild. Training is verl GRPO as a RayJob; agents use agentcore-rl-toolkit from the fixed Git URL and full SHA declared in `backend/pyproject.toml`, not a sibling checkout. See `README.md` for the product workflow.
 
 ## Commands
 
@@ -50,6 +50,7 @@ Backend
 - Raise `AppError` / `NotFound` / `Conflict` (`app/core/errors.py`) with a stable dotted `code`. The console localizes `apiErrors.<code>`, so a new user-facing code needs a key in both locale files.
 - Pipeline stages (`pipelines/*`, registered with `jobs.engine.register`) must be idempotent: inspect real AWS/K8s state before acting, so a restarted backend can re-run the first unfinished stage. Persist data for later stages in `ctx.context`.
 - Keep routers thin and put logic in `services/`.
+- Toolkit consumers use `services/toolkit_source.py`: inspect is read-only; resolve fetches only on actual cold-cache use into `<data_dir>/cache/toolkit/<full_sha>`. This source cache is separate from uv's install/build cache; `uv build` may still need network. Build/import helpers from tracked private copies, not the shared source. Optional `toolkit_path` accepts only a clean checkout of the same repository and SHA; dirty trees/editable installs fail without fallback. This migration never automatically updates existing cloud images/runtimes; later user operations may invoke the existing build flow.
 
 Tests
 - `tests/conftest.py` isolates every test: temp data dir, SQLite, and AWS/K8s factories that raise on use. Stub clients explicitly (`StubClient`). Tests must never touch real AWS or Kubernetes.
