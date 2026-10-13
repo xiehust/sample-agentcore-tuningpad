@@ -282,3 +282,25 @@ Committed docs/core-logic.zh-CN.html (sha256 aae50cd6…). A1/A2 independent sou
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Commit pinned Git toolkit source
+<!-- trellis-session: v=2 fp=05cd14b248889f73 -->
+
+**Date**: 2026-10-13
+**Task**: Commit pinned Git toolkit source
+**Branch**: `main`
+
+### Summary
+
+Split the mixed working tree by file/hunk: committed only toolkit-git-source changes (deps/lock, toolkit_source, consumers, trainer SHA, Settings/preflight, tests, docs/spec), leaving verl-colocate-async edits and .gitignore unstaged. Exported the staged-only tree and ran scripts/verify.sh offline with no AWS credentials: exit 0, 311 pytest passed, all sections OK. AC1-AC8 complete; real cloud training smoke still capacity-BLOCKED (InsufficientInstanceCapacity), not claimed passed. Archived task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `634b80c` | feat(toolkit): install agentcore-rl-toolkit from pinned Git source |
+
+### Status
+
+[OK] **Completed**
