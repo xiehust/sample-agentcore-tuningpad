@@ -144,6 +144,7 @@ def _fake_hf(monkeypatch, tmp_path, files: dict[str, str], total=2_000_000_000):
     import huggingface_hub
 
     for name, content in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(content)
     monkeypatch.setattr(
         huggingface_hub.HfApi, "model_info", lambda self, mid: _Info(list(files), total)
@@ -159,12 +160,22 @@ def test_check_model_compatible_via_registry(monkeypatch, tmp_path, toolkit_inst
     from agentcore_rl_toolkit.rollout_gateway import response_schemas
 
     monkeypatch.setitem(response_schemas._TEMPLATE_HASHES, digest, "qwen3_5")
-    cfg = {"architectures": ["X"], "text_config": {"max_position_embeddings": 262144}}
+    cfg = {
+        "architectures": ["Qwen3_5ForConditionalGeneration"],
+        "text_config": {"max_position_embeddings": 262144},
+    }
     _fake_hf(
-        monkeypatch, tmp_path, {"chat_template.jinja": template, "config.json": json.dumps(cfg)}
+        monkeypatch,
+        tmp_path,
+        {
+            "chat_template.jinja": template,
+            "config.json": json.dumps(cfg),
+            "model.safetensors.index.json": "{}",
+            "model.safetensors-00001-of-00001.safetensors": "",
+        },
     )
     r = models.check_model("org/model-2b")
-    assert r.compatible and r.schema == "qwen3_5"
+    assert r.compatible and r.schema == "qwen3_5" and r.reason is None
     assert r.template_source == "chat_template.jinja"
     assert r.multimodal and r.max_position_embeddings == 262144
     assert r.tool_call_parser == "qwen3_coder"
@@ -173,17 +184,94 @@ def test_check_model_compatible_via_registry(monkeypatch, tmp_path, toolkit_inst
 
 def test_check_model_incompatible_and_moe(monkeypatch, tmp_path, toolkit_installation):
     tc = {"chat_template": "unknown template"}
-    cfg = {"num_local_experts": 32, "num_experts_per_tok": 4, "max_position_embeddings": 131072}
+    cfg = {
+        "architectures": ["MixtralForCausalLM"],
+        "num_local_experts": 32,
+        "num_experts_per_tok": 4,
+        "max_position_embeddings": 131072,
+    }
     _fake_hf(
         monkeypatch,
         tmp_path,
-        {"tokenizer_config.json": json.dumps(tc), "config.json": json.dumps(cfg)},
+        {
+            "tokenizer_config.json": json.dumps(tc),
+            "config.json": json.dumps(cfg),
+            "model-00001-of-00002.safetensors": "",
+        },
         total=20_000_000_000,
     )
     r = models.check_model("org/moe")
     assert not r.compatible and "registry" in r.reason
     assert r.is_moe and r.num_experts == 32
     assert 2 < r.active_params_b < 5
+
+
+def _registered_template(monkeypatch) -> str:
+    template = "{% for m in messages %}{{ m.content }}{% endfor %}"
+    from agentcore_rl_toolkit.rollout_gateway import response_schemas
+
+    digest = hashlib.sha256(template.encode()).hexdigest()
+    monkeypatch.setitem(response_schemas._TEMPLATE_HASHES, digest, "qwen3_5")
+    return template
+
+
+def test_check_model_rejects_adapter_repo_with_registered_template(
+    monkeypatch, tmp_path, toolkit_installation
+):
+    # strands-decider-2B-qwen3.5-v1-2610's layout: stock Qwen3.5 template, LoRA + custom head,
+    # no config.json and no torso weights.
+    _fake_hf(
+        monkeypatch,
+        tmp_path,
+        {
+            "chat_template.jinja": _registered_template(monkeypatch),
+            "strands_decider_config.json": "{}",
+            "head.safetensors": "",
+            "lora/adapter_config.json": "{}",
+            "lora/adapter_model.safetensors": "",
+            "tokenizer.json": "{}",
+        },
+        total=30_000_000,
+    )
+    r = models.check_model("org/decider")
+    assert not r.compatible and "config.json" in r.reason
+    assert r.schema == "qwen3_5" and r.tool_call_parser is None
+
+
+@pytest.mark.parametrize(
+    ("archs", "weights", "needle"),
+    [
+        (["Qwen3ForSequenceClassification"], ["model.safetensors"], "generative"),
+        ([], ["model.safetensors"], "generative"),
+        (["Qwen3ForCausalLM"], ["adapter_model.safetensors"], "weights"),
+        (["Qwen3ForCausalLM"], ["sub/model.safetensors"], "weights"),
+    ],
+)
+def test_check_model_rejects_non_generative_or_weightless(
+    monkeypatch, tmp_path, toolkit_installation, archs, weights, needle
+):
+    files = {
+        "chat_template.jinja": _registered_template(monkeypatch),
+        "config.json": json.dumps({"architectures": archs}),
+    }
+    files.update({w: "" for w in weights})
+    _fake_hf(monkeypatch, tmp_path, files)
+    r = models.check_model("org/m")
+    assert not r.compatible and needle in r.reason
+
+
+def test_check_model_accepts_sharded_bin_weights(monkeypatch, tmp_path, toolkit_installation):
+    _fake_hf(
+        monkeypatch,
+        tmp_path,
+        {
+            "chat_template.jinja": _registered_template(monkeypatch),
+            "config.json": json.dumps({"architectures": ["Qwen3ForCausalLM"]}),
+            "pytorch_model.bin.index.json": "{}",
+            "pytorch_model-00001-of-00002.bin": "",
+        },
+    )
+    assert models.check_model("org/m").compatible
 
 
 def test_check_model_invalid_id():

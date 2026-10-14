@@ -87,6 +87,27 @@ def _estimate_active(params: int | None, experts: int | None, per_tok: int | Non
     return round(active / 1e9, 2)
 
 
+def _not_a_full_lm(files: set[str], cfg: dict[str, Any]) -> str | None:
+    """verl/vLLM load a complete generative checkpoint; a borrowed chat template is not enough.
+
+    Adapter-only or custom-head repos (e.g. strands-decider) ship a stock template whose hash
+    is in the registry, so the template check alone would pass them.
+    """
+    if "config.json" not in files:
+        return "no config.json: not a full Hugging Face model (adapter or custom checkpoint)"
+    archs = cfg.get("architectures") or []
+    if not any(a.endswith(("ForCausalLM", "ForConditionalGeneration")) for a in archs):
+        return f"architectures {archs} are not a generative language model"
+    if not any(
+        f.startswith(("model", "pytorch_model"))
+        and f.endswith((".safetensors", ".safetensors.index.json", ".bin", ".bin.index.json"))
+        for f in files
+        if "/" not in f
+    ):
+        return "no model weights (model*.safetensors / pytorch_model*.bin) at the repo root"
+    return None
+
+
 def schema_for_template(template: str | None) -> str | None:
     if not template:
         return None
@@ -141,6 +162,8 @@ def check_model(model_id: str, *, hf_token: str | None = None, refresh: bool = F
         reason = "gated repository: accept the license on Hugging Face and provide a token"
 
     schema = schema_for_template(template)
+    if reason is None:
+        reason = _not_a_full_lm(files, cfg)
     if reason is None and template is None:
         reason = "no chat template found"
     elif reason is None and schema is None:
@@ -148,14 +171,15 @@ def check_model(model_id: str, *, hf_token: str | None = None, refresh: bool = F
             "chat template is not in the rollout gateway registry "
             "(supported: Qwen2.5/Qwen3/Qwen3.5/Qwen3.6/Qwen3-Coder/Nemotron-3, GLM4-MoE, GPT-OSS)"
         )
+    compatible = reason is None
     is_moe, experts, per_tok = _moe_info(cfg)
     t = _text_config(cfg)
-    parsers = VLLM_PARSERS.get(schema or "", {})
+    parsers = VLLM_PARSERS.get(schema or "", {}) if compatible else {}
     result = ModelCheck(
         model_id=model_id,
-        compatible=schema is not None,
+        compatible=compatible,
         schema=schema,
-        reason=None if schema else reason,
+        reason=reason,
         template_source=source,
         params=params,
         params_b=round(params / 1e9, 2) if params else None,
