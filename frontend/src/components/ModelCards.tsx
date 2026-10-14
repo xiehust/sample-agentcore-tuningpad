@@ -14,6 +14,7 @@ export function ModelCheckCard({ check }: { check: ModelCheck }) {
     >
       {!check.compatible && check.reason && <Alert tone="error">{check.reason}</Alert>}
       <Descriptions
+        one
         items={[
           { label: t("models.schema"), value: check.schema && <code className="tp-mono">{check.schema}</code> },
           { label: t("models.params"), value: check.params_b ? `${num(check.params_b)} B` : "—" },
@@ -27,7 +28,8 @@ export function ModelCheckCard({ check }: { check: ModelCheck }) {
   );
 }
 
-export function PlanCard({ plan }: { plan: Plan }) {
+// `one`: single-column details for half-width layouts, where two columns squeeze values to a few characters.
+export function PlanCard({ plan, one }: { plan: Plan; one?: boolean }) {
   const { t } = useTranslation();
   return (
     <Card title={t("models.planTitle")} sub={<Tag tone="blue">{t(`strategy.${plan.strategy}`)}</Tag>} testId="tp-plan">
@@ -37,6 +39,7 @@ export function PlanCard({ plan }: { plan: Plan }) {
         </div>
       ))}
       <Descriptions
+        one={one}
         items={[
           { label: t("models.profile"), value: plan.profile },
           { label: t("models.parallel"), value: `TP ${plan.tp} · CP ${plan.cp} · EP ${plan.ep} · rollout TP ${plan.rollout_tp}` },

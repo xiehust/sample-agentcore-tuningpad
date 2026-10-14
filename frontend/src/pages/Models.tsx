@@ -67,7 +67,7 @@ function ModelsTab() {
       {check && (
         <div className="tp-grid c2">
           <ModelCheckCard check={check} />
-          {plan && <PlanCard plan={plan} />}
+          {plan && <PlanCard plan={plan} one />}
         </div>
       )}
       <Card title={t("models.presets")} flush>
