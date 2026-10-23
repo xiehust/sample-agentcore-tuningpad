@@ -13,14 +13,18 @@ objects such as RayJobs or inference Deployments).
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import UTC, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
+
+from sqlalchemy import func, or_
 
 from ..core.config import get_settings
 from ..core.db import new_id, session_scope, utcnow
@@ -30,12 +34,24 @@ from ..models import Job
 log = logging.getLogger(__name__)
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-ACTIVE = {"queued", "running"}
+ACTIVE = {"queued", "running", "waiting"}
 LOG_READ_LIMIT = 256 * 1024
 
 
 class JobCancelled(Exception):
     pass
+
+
+class JobInterrupted(Exception):
+    """The backend is stopping; keep this job resumable instead of cancelling it."""
+
+
+@dataclass
+class JobDeferred(Exception):
+    delay_s: float
+    reason: str
+    detail: str | None
+    detail_params: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -67,6 +83,16 @@ def pipeline(job_type: str) -> list[Stage]:
     if job_type not in _PIPELINES:
         raise AppError("job.unknown_type", f"no pipeline registered for {job_type}")
     return _PIPELINES[job_type]
+
+
+def _pending_stage(name: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": "pending",
+        "detail": None,
+        "started_at": None,
+        "ended_at": None,
+    }
 
 
 def log_path(job_id: str) -> Path:
@@ -135,6 +161,22 @@ class StageContext:
     def check_cancel(self) -> None:
         if self.engine.is_cancel_requested(self.job_id):
             raise JobCancelled()
+        if self.engine._stop.is_set():
+            raise JobInterrupted()
+
+    def defer(
+        self,
+        *,
+        delay_s: float,
+        reason: str,
+        detail: str | None = None,
+        detail_params: dict[str, Any] | None = None,
+    ) -> NoReturn:
+        """Persist a wait and release this worker; the same stage is checked again later."""
+        self.check_cancel()
+        if not math.isfinite(delay_s) or delay_s <= 0:
+            raise ValueError("defer delay_s must be finite and positive")
+        raise JobDeferred(delay_s, reason, detail, detail_params)
 
     def sleep(self, seconds: float) -> None:
         """Interruptible wait for polling loops."""
@@ -172,10 +214,13 @@ class JobEngine:
             thread_name_prefix="job",
         )
         self._cancel: set[str] = set()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._submitted: set[str] = set()
+        self._resubmit: set[str] = set()
         self._reconcilers: list[tuple[str, Callable[[], None], float]] = []
         self._stop = threading.Event()
         self._reconcile_thread: threading.Thread | None = None
+        self._scheduler_thread: threading.Thread | None = None
 
     # ---- lifecycle ----
     def start(
@@ -197,47 +242,50 @@ class JobEngine:
                     status="queued",
                     payload=payload or {},
                     context={},
-                    stages=[
-                        {
-                            "name": st.name,
-                            "status": "pending",
-                            "detail": None,
-                            "started_at": None,
-                            "ended_at": None,
-                        }
-                        for st in stages
-                    ],
+                    stages=[_pending_stage(st.name) for st in stages],
                 )
             )
         append_log(job_id, f"queued {job_type} target={target_id}")
-        if run_inline:
-            self._run(job_id)
-        else:
-            self._pool.submit(self._run, job_id)
+        self._submit(job_id, run_inline=run_inline)
         return job_id
 
     def retry(self, job_id: str) -> None:
-        with session_scope() as s:
-            job = s.get(Job, job_id)
-            if not job:
-                raise NotFound("job.not_found", f"job {job_id} not found")
-            if job.status in ACTIVE:
-                raise AppError("job.active", "job is still running", status=409)
-            job.status = "queued"
-            job.error = None
-            job.error_code = None
-            job.ended_at = None
-        append_log(job_id, "retry requested")
-        self._pool.submit(self._run, job_id)
+        with self._lock:
+            with session_scope() as s:
+                job = s.get(Job, job_id)
+                if not job:
+                    raise NotFound("job.not_found", f"job {job_id} not found")
+                if job.status in ACTIVE:
+                    raise AppError("job.active", "job is still running", status=409)
+                job.status = "queued"
+                job.error = None
+                job.error_code = None
+                job.ended_at = None
+                job.next_attempt_at = None
+            self._cancel.discard(job_id)
+            append_log(job_id, "retry requested")
+            self._submit(job_id)
 
     def cancel(self, job_id: str) -> None:
         with self._lock:
             self._cancel.add(job_id)
-        with session_scope() as s:
-            job = s.get(Job, job_id)
-            if job and job.status == "queued":
-                job.status = "cancelled"
-                job.ended_at = utcnow()
+            with session_scope() as s:
+                job = s.get(Job, job_id)
+                idle = job is not None and job.status in {"queued", "waiting"}
+                if idle:
+                    job.stages = [
+                        {
+                            **st,
+                            "status": "cancelled",
+                            "ended_at": utcnow().isoformat(),
+                            "next_attempt_at": None,
+                        }
+                        if st["status"] == "waiting"
+                        else st
+                        for st in job.stages
+                    ]
+            if idle:
+                self._finish(job_id, "cancelled")
         append_log(job_id, "cancel requested")
 
     def is_cancel_requested(self, job_id: str) -> bool:
@@ -245,17 +293,78 @@ class JobEngine:
             return job_id in self._cancel
 
     def resume_pending(self) -> list[str]:
-        """On startup: re-run jobs that were queued/running when the process died."""
-        with session_scope() as s:
-            ids = [j.id for j in s.query(Job).filter(Job.status.in_(list(ACTIVE))).all()]
-        for jid in ids:
-            append_log(jid, "backend restarted — resuming from first unfinished stage")
-            self._pool.submit(self._run, jid)
-        return ids
+        """On startup, recover interrupted jobs without bringing future waits forward."""
+        with self._lock:
+            if self._stop.is_set():
+                return []
+            with session_scope() as s:
+                jobs = s.query(Job).filter(Job.status.in_(["queued", "running"])).all()
+                ids = [job.id for job in jobs if job.id not in self._submitted]
+                for job in jobs:
+                    if job.id in ids:
+                        job.status = "queued"
+                        job.next_attempt_at = None
+            for jid in ids:
+                append_log(jid, "backend restarted — resuming from first unfinished stage")
+                self._submit(jid)
+            return ids + self.resume_due()
+
+    def resume_due(self) -> list[str]:
+        """Atomically claim due waits; competing schedulers cannot submit the same attempt."""
+        with self._lock:
+            if self._stop.is_set():
+                return []
+            due = or_(Job.next_attempt_at.is_(None), Job.next_attempt_at <= utcnow())
+            with session_scope() as s:
+                ids = [
+                    row.id
+                    for row in s.query(Job.id)
+                    .filter(Job.status == "waiting", due)
+                    .order_by(Job.next_attempt_at)
+                    .all()
+                ]
+            claimed = []
+            for jid in ids:
+                with session_scope() as s:
+                    changed = (
+                        s.query(Job)
+                        .filter(Job.id == jid, Job.status == "waiting", due)
+                        .update(
+                            {Job.status: "queued", Job.next_attempt_at: None},
+                            synchronize_session=False,
+                        )
+                    )
+                if changed:
+                    append_log(jid, "scheduled check — resuming from first unfinished stage")
+                    self._submit(jid)
+                    claimed.append(jid)
+            return claimed
+
+    def start_scheduler(self, *, interval_s: float = 2) -> None:
+        """Checks only the ledger, separately from potentially slow resource reconcilers."""
+        with self._lock:
+            if self._scheduler_thread or self._stop.is_set():
+                return
+
+            def loop() -> None:
+                while not self._stop.is_set():
+                    try:
+                        self.resume_due()
+                    except Exception:
+                        log.exception("deferred job scheduling failed")
+                    self._stop.wait(interval_s)
+
+            self._scheduler_thread = threading.Thread(
+                target=loop, name="job-scheduler", daemon=True
+            )
+            self._scheduler_thread.start()
 
     def shutdown(self) -> None:
-        self._stop.set()
-        self._pool.shutdown(wait=False, cancel_futures=True)
+        with self._lock:
+            self._stop.set()
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        if self._scheduler_thread:
+            self._scheduler_thread.join(timeout=5)
 
     # ---- reconcilers ----
     def add_reconciler(self, name: str, fn: Callable[[], None], interval_s: float) -> None:
@@ -282,6 +391,31 @@ class JobEngine:
         self._reconcile_thread.start()
 
     # ---- internals ----
+    def _submit(self, job_id: str, *, run_inline: bool = False) -> None:
+        with self._lock:
+            if self._stop.is_set():
+                return
+            if job_id in self._submitted:
+                # A fast retry/check can arrive after the durable status changed but before
+                # the previous worker returned. Dispatch it as soon as that worker exits.
+                self._resubmit.add(job_id)
+                return
+            self._submitted.add(job_id)
+            if not run_inline:
+                self._pool.submit(self._execute, job_id)
+                return
+        self._execute(job_id)
+
+    def _execute(self, job_id: str) -> None:
+        try:
+            self._run(job_id)
+        finally:
+            with self._lock:
+                self._submitted.discard(job_id)
+                if job_id in self._resubmit:
+                    self._resubmit.discard(job_id)
+                    self._submit(job_id)
+
     def _update_stage(self, job_id: str, name: str, **fields: Any) -> None:
         with session_scope() as s:
             job = s.get(Job, job_id)
@@ -317,37 +451,104 @@ class JobEngine:
             job.error = error
             job.error_code = code
             job.ended_at = utcnow()
+            job.next_attempt_at = None
         with self._lock:
             self._cancel.discard(job_id)
         append_log(job_id, f"job {status}" + (f": {error}" if error else ""))
 
+    def _defer(self, job_id: str, name: str, deferred: JobDeferred) -> None:
+        with self._lock:
+            if job_id in self._cancel:
+                raise JobCancelled()
+            next_attempt = utcnow() + timedelta(seconds=deferred.delay_s)
+            with session_scope() as s:
+                job = s.get(Job, job_id)
+                if not job or job.status == "cancelled":
+                    raise JobCancelled()
+                job.status = "waiting"
+                job.next_attempt_at = next_attempt
+                job.stages = [
+                    {
+                        **st,
+                        "status": "waiting",
+                        "reason": deferred.reason,
+                        "detail": deferred.detail,
+                        "detail_params": deferred.detail_params,
+                        "next_attempt_at": next_attempt.isoformat(),
+                        "ended_at": None,
+                    }
+                    if st["name"] == name
+                    else st
+                    for st in job.stages
+                ]
+            append_log(
+                job_id,
+                f"[{name}] waiting: {deferred.reason}; next check {next_attempt.isoformat()}",
+            )
+
     def _run(self, job_id: str) -> None:
-        with session_scope() as s:
-            job = s.get(Job, job_id)
-            if not job or job.status in TERMINAL:
+        with self._lock, session_scope() as s:
+            if self._stop.is_set():
                 return
-            job.status = "running"
-            job.started_at = job.started_at or utcnow()
+            claimed = (
+                s.query(Job)
+                .filter(Job.id == job_id, Job.status == "queued")
+                .update(
+                    {
+                        Job.status: "running",
+                        Job.started_at: func.coalesce(Job.started_at, utcnow()),
+                        Job.next_attempt_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if not claimed:
+                return
+            job = s.get(Job, job_id)
             job_type, target, payload = job.type, job.target_id, dict(job.payload or {})
             context = dict(job.context or {})
-            done = {st["name"] for st in job.stages if st["status"] == "succeeded"}
         ctx = StageContext(self, job_id, job_type, target, payload, context)
         try:
-            for stage in pipeline(job_type):
+            registered = pipeline(job_type)
+            with session_scope() as s:
+                job = s.get(Job, job_id)
+                previous = {st["name"]: st for st in job.stages}
+                names = {stage.name for stage in registered}
+                job.stages = [
+                    previous.get(stage.name, _pending_stage(stage.name)) for stage in registered
+                ] + [st for name, st in previous.items() if name not in names]
+                done = {st["name"] for st in job.stages if st["status"] == "succeeded"}
+            for stage in registered:
                 if stage.name in done:
                     continue
                 ctx.check_cancel()
                 ctx.stage = stage.name
+                prior = previous.get(stage.name, {})
+                started_at = (
+                    prior.get("started_at")
+                    if prior.get("status") in {"running", "waiting"}
+                    else None
+                )
                 self._update_stage(
                     job_id,
                     stage.name,
                     status="running",
-                    started_at=utcnow().isoformat(),
+                    started_at=started_at or utcnow().isoformat(),
                     ended_at=None,
+                    reason=None,
+                    detail_params=None,
+                    next_attempt_at=None,
                 )
                 append_log(job_id, f"[{stage.name}] start")
                 try:
-                    stage.fn(ctx)
+                    try:
+                        stage.fn(ctx)
+                        ctx.check_cancel()
+                    except JobDeferred as deferred:
+                        self._defer(job_id, stage.name, deferred)
+                        return
+                except JobInterrupted:
+                    raise
                 except JobCancelled:
                     self._update_stage(
                         job_id, stage.name, status="cancelled", ended_at=utcnow().isoformat()
@@ -363,6 +564,8 @@ class JobEngine:
                 )
                 append_log(job_id, f"[{stage.name}] done")
             self._finish(job_id, "succeeded")
+        except JobInterrupted:
+            append_log(job_id, "backend stopping — job will resume after restart")
         except JobCancelled:
             self._finish(job_id, "cancelled")
         except AppError as e:
@@ -391,6 +594,10 @@ def set_engine(engine: JobEngine | None) -> None:
 
 
 def job_view(job: Job) -> dict[str, Any]:
+    next_attempt = job.next_attempt_at
+    if next_attempt and next_attempt.tzinfo is None:
+        # SQLite stores UTC datetimes without an offset; don't send local-looking dates.
+        next_attempt = next_attempt.replace(tzinfo=UTC)
     return {
         "id": job.id,
         "type": job.type,
@@ -402,6 +609,7 @@ def job_view(job: Job) -> dict[str, Any]:
         "created_at": job.created_at,
         "started_at": job.started_at,
         "ended_at": job.ended_at,
+        "next_attempt_at": next_attempt,
     }
 
 

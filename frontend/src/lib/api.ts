@@ -72,12 +72,15 @@ export const http = { get, post, patch, del };
 
 /* ---------- shared shapes ---------- */
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type JobStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export interface JobStage {
   name: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
   detail: string | null;
+  reason?: string | null;
+  detail_params?: Record<string, unknown> | null;
+  next_attempt_at?: string | null;
   started_at: string | null;
   ended_at: string | null;
 }
@@ -90,6 +93,7 @@ export interface Job {
   stages: JobStage[];
   error: string | null;
   error_code: string | null;
+  next_attempt_at: string | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;

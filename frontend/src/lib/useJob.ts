@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, type Job } from "./api";
 import { DETAIL_POLL_MS, usePoll } from "./poll";
 
-export const LIVE_JOB = new Set(["queued", "running"]);
+export const LIVE_JOB = new Set(["queued", "running", "waiting"]);
 
 /** Poll a job until terminal; `onDone` fires once on the transition. */
 export function useJob(jobId: string | null | undefined, onDone?: (job: Job) => void) {

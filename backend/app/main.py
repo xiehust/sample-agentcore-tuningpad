@@ -34,6 +34,7 @@ def create_app(*, start_background: bool = True) -> FastAPI:
             resumed = engine.resume_pending()
             if resumed:
                 log.info("resumed %d unfinished jobs", len(resumed))
+            engine.start_scheduler()
             engine.start_reconcilers()
         yield
         if start_background:

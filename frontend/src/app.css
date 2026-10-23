@@ -27,10 +27,14 @@
 }
 .v2 .tp-stage.running { border-color: var(--v2-primary-line); color: var(--v2-primary); background: var(--v2-primary-soft); }
 .v2 .tp-stage.running .n { background: var(--v2-primary); color: #fff; }
+.v2 .tp-stage.waiting { border-color: var(--v2-warning); color: var(--v2-ink-2); background: var(--v2-warning-soft); }
+.v2 .tp-stage.waiting .n { background: var(--v2-warning); color: #fff; }
 .v2 .tp-stage.succeeded .n { background: var(--v2-success); color: #fff; }
 .v2 .tp-stage.failed { border-color: var(--v2-danger); color: var(--v2-danger); }
 .v2 .tp-stage.failed .n { background: var(--v2-danger); color: #fff; }
 .v2 .tp-stage .d { color: var(--v2-ink-3); }
+.v2 .tp-job-waiting { margin-top: 12px; overflow-wrap: anywhere; }
+.v2 .tp-job-waiting .v2-alert > div { display: grid; gap: 4px; }
 
 /* line charts */
 .v2 .tp-chart { width: 100%; height: auto; max-height: 220px; display: block; }

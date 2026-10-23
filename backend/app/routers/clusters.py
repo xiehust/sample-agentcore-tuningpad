@@ -13,6 +13,7 @@ from ..core.errors import AppError, Conflict, NotFound
 from ..jobs.engine import get_engine, job_view, latest_job
 from ..models import Cluster, Run
 from ..pipelines import cluster as pc
+from ..services import cluster_deletion
 from ..services import components as comp
 from ..services import hyperpod as hp
 from ..services import nodegroups as ngs
@@ -392,11 +393,7 @@ def ledger(cid: str):
 
 @router.delete("/{cid}")
 def delete_cluster(cid: str, confirm: str = ""):
-    c = pc.load(cid)
-    if confirm != c["name"]:
-        raise AppError("cluster.confirm_name", "type the cluster name to confirm deletion")
-    pc.save(cid, status="deleting")
-    return {"job_id": _start(cid, "cluster.delete")}
+    return {"job_id": cluster_deletion.request_delete(cid, confirm)}
 
 
 # ---------------- training plans ----------------

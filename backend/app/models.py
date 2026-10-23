@@ -216,3 +216,4 @@ class Job(Base, TimestampMixin):
     error_code: Mapped[str | None] = mapped_column(String(128))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

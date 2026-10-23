@@ -167,7 +167,19 @@
     "retry": "Retry",
     "showLog": "Show log",
     "hideLog": "Hide log",
-    "logWaiting": "Waiting for log output…"
+    "logWaiting": "Waiting for log output…",
+    "waitingTitle": "Waiting for AWS cleanup",
+    "waitingAutomatic": "TuningPad checks in the background and continues automatically when the resources are released. You can close this page; progress is saved across backend restarts.",
+    "nextCheck": "Next check: {{time}}",
+    "waitingReasons": {
+      "clusterWorkloadsDeleting": "Waiting for {{service_count}} workload services and their load balancers to finish deleting.",
+      "clusterComputeDeleting": "AWS is deleting the cluster's compute resources.",
+      "clusterAgentcoreEnis": "Waiting for AWS to release {{eni_count}} AgentCore network interfaces. Elapsed: {{waited_hours}} hours.",
+      "clusterAgentcoreEnisDelayed": "AWS network cleanup has taken more than 8 hours; {{eni_count}} AgentCore network interfaces remain. Elapsed: {{waited_hours}} hours. Automatic checks will continue.",
+      "clusterSecurityGroups": "Waiting for {{group_count}} security groups to become available for deletion.",
+      "clusterStackDeleting": "AWS is finishing deletion of the cluster's network resources.",
+      "clusterRuntimeDeleting": "Waiting for AWS to finish deleting {{runtime_count}} AgentCore runtimes."
+    }
   },
   "status": {
     "ready": "Ready",
@@ -175,6 +187,7 @@
     "running": "Running",
     "queued": "Queued",
     "pending": "Pending",
+    "waiting": "Waiting for cleanup",
     "failed": "Failed",
     "cancelled": "Cancelled",
     "creating": "Creating",
@@ -220,6 +233,10 @@
     "guardian": "Guardian",
     "delete": "Delete",
     "workloads": "Workloads",
+    "nodegroups": "Node groups",
+    "runtimes": "AgentCore runtimes",
+    "compute": "Compute cleanup",
+    "network": "Network cleanup",
     "cluster": "Cluster",
     "component.access": "EKS access",
     "component.reach": "API reach",

@@ -19,6 +19,7 @@ import {
 } from "../lib/api";
 import { dateTime, money, num } from "../lib/format";
 import { LIST_POLL_MS, DETAIL_POLL_MS, usePoll } from "../lib/poll";
+import { LIVE_JOB } from "../lib/useJob";
 import { regionOptions } from "../lib/regions";
 import { useLoad, useV2Toast } from "../v2/hooks";
 import {
@@ -736,7 +737,7 @@ function ClusterDetail({ id }: { id: string }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmName, setConfirmName] = useState("");
-  const live = c.data && (LIVE_STATUSES.has(c.data.status) || c.data.job?.status === "running");
+  const live = c.data && (LIVE_STATUSES.has(c.data.status) || (c.data.job && LIVE_JOB.has(c.data.job.status)));
   usePoll(c.reload, live ? DETAIL_POLL_MS * 2 : LIST_POLL_MS * 2);
 
   if (!c.data) return c.error ? <Alert tone="error">{c.error}</Alert> : <Spin />;

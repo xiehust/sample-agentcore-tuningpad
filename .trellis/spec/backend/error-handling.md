@@ -108,6 +108,11 @@ Background work does not pass through FastAPI exception handlers. In
   code is `aws.client_error` when the exception class name is `ClientError`, otherwise
   `internal`; do not assume all HTTP mappings also exist in the worker.
 - `StageContext.wait_until()` raises `AppError("job.timeout", ...)` on a polling timeout.
+- `StageContext.defer()` raises `JobDeferred` for a known dependency still being released.
+  The engine persists active `waiting` state and `next_attempt_at`, releases the worker,
+  and schedules the next check. It does not invoke a finish hook or report failure.
+  See [durable cluster deletion](./cluster-deletion.md); arbitrary failures must not
+  be silently converted into waiting.
 - `JobEngine.retry()` clears the job error and re-runs unfinished stages, not succeeded
   stages. `job_view()` exposes `error` and `error_code` to the console.
 

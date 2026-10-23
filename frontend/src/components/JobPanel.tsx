@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
-import { api, localizedMessage, type Job } from "../lib/api";
+import { api, localizedMessage, type Job, type JobStage } from "../lib/api";
 import { LIVE_JOB, useJob } from "../lib/useJob";
 import { DETAIL_POLL_MS, usePoll } from "../lib/poll";
-import { duration } from "../lib/format";
+import { dateTime, duration } from "../lib/format";
 import { Alert, Button, Card } from "../v2/ui";
 import { StatusTag } from "./StatusTag";
 
+function stageDetail(stage: JobStage, t: TFunction): string | null {
+  if (!stage.reason) return stage.detail;
+  return t(`job.waitingReasons.${stage.reason}`, {
+    ...stage.detail_params,
+    defaultValue: stage.detail ?? "",
+  });
+}
 
 /** Stage bar of one pipeline job (launchpad LaunchSequence pattern). */
 export function StageBar({ job }: { job: Job }) {
@@ -16,11 +24,13 @@ export function StageBar({ job }: { job: Job }) {
     <div className="tp-stages" data-testid="tp-stages">
       {job.stages.map((st, i) => {
         const key = `stages.${st.name}`;
+        const detail = stageDetail(st, t);
         return (
-          <span key={st.name} className={`tp-stage ${st.status}`} title={st.detail ?? undefined}>
+          <span key={st.name} className={`tp-stage ${st.status}`} title={detail ?? undefined}>
             <span className="n">{st.status === "succeeded" ? "✓" : st.status === "failed" ? "✕" : i + 1}</span>
             {i18n.exists(key) ? t(key) : st.name}
-            {st.status === "running" && st.detail && <span className="d">· {st.detail}</span>}
+            {st.status === "running" && detail && <span className="d">· {detail}</span>}
+            {st.status === "waiting" && <span className="d">· {t("status.waiting")}</span>}
             {st.status === "succeeded" && st.started_at && st.ended_at && (
               <span className="d">{duration(st.started_at, st.ended_at)}</span>
             )}
@@ -91,6 +101,9 @@ export function JobPanel({
   if (!job) return null;
   const jobError = job.error_code && job.error ? localizedMessage(job.error_code, job.error) : job.error;
   const live = LIVE_JOB.has(job.status);
+  const waitingStage = job.stages.find((stage) => stage.status === "waiting");
+  const waitingDetail = waitingStage ? stageDetail(waitingStage, t) : null;
+  const delayed = waitingStage?.reason === "clusterAgentcoreEnisDelayed";
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -124,6 +137,18 @@ export function JobPanel({
       testId="tp-job-panel"
     >
       <StageBar job={job} />
+      {job.status === "waiting" && (
+        <div className="tp-job-waiting" data-testid="tp-job-waiting">
+          <Alert tone={delayed ? "warn" : "info"}>
+            <strong>{t("job.waitingTitle")}</strong>
+            {waitingDetail && <div>{waitingDetail}</div>}
+            <div>{t("job.waitingAutomatic")}</div>
+            {job.next_attempt_at && (
+              <div>{t("job.nextCheck", { time: dateTime(job.next_attempt_at) })}</div>
+            )}
+          </Alert>
+        </div>
+      )}
       {job.error && (
         <div style={{ marginTop: 12, overflowWrap: "anywhere" }}>
           <Alert tone="error">

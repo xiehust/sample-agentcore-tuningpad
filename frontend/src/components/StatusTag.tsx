@@ -7,7 +7,7 @@ const TONES: Record<string, TagTone> = {
   active: "green", Active: "green", ok: "green",
   queued: "gray", pending: "gray", Pending: "gray", creating: "blue", provisioning: "blue", installing: "blue",
   Creating: "blue", Updating: "blue", deploying: "blue", building: "blue", scaling: "blue", deleting: "orange",
-  SystemUpdating: "blue", warn: "orange", degraded: "orange", interrupted: "orange", stopping: "orange",
+  SystemUpdating: "blue", warn: "orange", degraded: "orange", interrupted: "orange", stopping: "orange", waiting: "orange",
   failed: "red", Failed: "red", fail: "red", cancelled: "gray", stopped: "gray", deleted: "gray",
   delete_failed: "red", CREATE_FAILED: "red", Unavailable: "red",
 };

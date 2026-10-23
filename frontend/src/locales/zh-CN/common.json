@@ -167,7 +167,19 @@
     "retry": "重试",
     "showLog": "查看日志",
     "hideLog": "收起日志",
-    "logWaiting": "等待日志输出…"
+    "logWaiting": "等待日志输出…",
+    "waitingTitle": "等待 AWS 回收资源",
+    "waitingAutomatic": "TuningPad 会在后台定期检查，资源释放后自动继续。可关闭此页面，后端重启后也会恢复已保存的进度。",
+    "nextCheck": "下次检查：{{time}}",
+    "waitingReasons": {
+      "clusterWorkloadsDeleting": "等待 {{service_count}} 个工作负载服务及其关联的负载均衡器完成删除。",
+      "clusterComputeDeleting": "AWS 正在删除集群的计算资源。",
+      "clusterAgentcoreEnis": "等待 AWS 回收 {{eni_count}} 张 AgentCore 网卡，已等待 {{waited_hours}} 小时。",
+      "clusterAgentcoreEnisDelayed": "AWS 网络回收已超过 8 小时，仍有 {{eni_count}} 张 AgentCore 网卡未释放；已等待 {{waited_hours}} 小时。后台将继续自动检查。",
+      "clusterSecurityGroups": "等待 {{group_count}} 个安全组解除占用后删除。",
+      "clusterStackDeleting": "AWS 正在完成集群网络资源的删除。",
+      "clusterRuntimeDeleting": "等待 AWS 完成 {{runtime_count}} 个 AgentCore Runtime 的删除。"
+    }
   },
   "status": {
     "ready": "就绪",
@@ -175,6 +187,7 @@
     "running": "运行中",
     "queued": "排队中",
     "pending": "等待中",
+    "waiting": "等待回收",
     "failed": "失败",
     "cancelled": "已取消",
     "creating": "创建中",
@@ -220,6 +233,10 @@
     "guardian": "守护任务",
     "delete": "删除",
     "workloads": "工作负载",
+    "nodegroups": "节点组",
+    "runtimes": "AgentCore Runtime",
+    "compute": "计算资源清理",
+    "network": "网络资源清理",
     "cluster": "集群",
     "component.access": "EKS 访问",
     "component.reach": "API 连通",

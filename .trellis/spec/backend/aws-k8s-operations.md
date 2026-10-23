@@ -44,18 +44,20 @@ does not prove the DEFAULT endpoint routes to the new version.
 
 ## Deleting a cluster
 
-The order is fixed:
+See [durable cluster deletion](./cluster-deletion.md) for the engine/API contract,
+failure classification, and regression requirements. The order is:
 
 1. Workloads and node groups.
-2. AgentCore runtimes. Wait for their ENIs to go away.
-3. Platform SGs (`sg-acr`, `sg-nlb`). Retry on `DependencyViolation` for up to
-   `SG_RELEASE_TIMEOUT_S`.
-4. The CloudFormation stack.
+2. Submit AgentCore runtime deletion and persist acknowledgements.
+3. Start root CloudFormation deletion so its reverse dependencies release compute.
+4. Wait for AgentCore ENIs and platform SG dependencies using durable deferred checks.
+5. Automatically finish/retry root-stack deletion when network dependencies are gone.
 
 The SGs sit in the stack's VPC but are not stack resources. If any of them remains, the
-stack ends in `DELETE_FAILED` on `VPC`. After a re-issued delete, report
-`stack_failure_reason`, which reads only the events of the latest operation. Older events
-are stale.
+stack can end in `DELETE_FAILED` on a network resource. Only verified network dependency
+failures are expected waits; inspect nested resources and surface other failures.
+Eight hours triggers a delay warning, not terminal failure. Do not delete nested stacks
+directly, force-detach ENIs, or treat permission errors as resource absence.
 
 ## GPU node lifecycle (cost)
 

@@ -61,7 +61,11 @@ Use each page's established cadence rather than polling everything at 2.5s:
 - `ClusterDetail` in `pages/Clusters.tsx`: 5s while live, 16s otherwise.
 - `RunLog`: initial effect plus 10s polling only while live.
 - `useJob`: immediate load; 2.5s polling while no snapshot exists or the job is
-  in `LIVE_JOB` (`queued`, `running`).
+  in `LIVE_JOB` (`queued`, `running`, `waiting`). Deferred cleanup is active:
+  retain cancellation, show the next scheduled check, and do not offer retry.
+  `JobPanel` translates stage `reason` and `detail_params` in both locales;
+  historical stages may omit these fields. See the backend
+  [durable deletion contract](../backend/cluster-deletion.md).
 
 `useJob` keeps `onDone` in a ref. It calls that callback on an observed
 live-to-terminal transition, not when the first fetched snapshot is already

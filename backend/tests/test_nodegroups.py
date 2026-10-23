@@ -516,7 +516,7 @@ def test_replace_faulty_node_ec2_and_hyperpod(stub_aws, monkeypatch):
     assert len(asg.calls) == 1 and hp_calls == ["i-0abc"] and len(patched) == 2
 
 
-def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkeypatch):
+def test_cluster_delete_submits_runtime_deletion_before_network_wait(stub_aws, monkeypatch):
     from app.models import Agent, AgentRuntime
     from app.pipelines import cluster as pc
 
@@ -535,14 +535,14 @@ def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkey
                 status="ready",
             )
         )
-    enis = iter(
-        [{"NetworkInterfaces": [{"NetworkInterfaceId": "eni-1"}]}, {"NetworkInterfaces": []}]
+    acc = StubClient(
+        delete_agent_runtime={},
+        list_agent_runtimes={"agentRuntimes": [{"agentRuntimeId": "tp_x-1", "status": "READY"}]},
     )
-    acc = StubClient(delete_agent_runtime={})
     stub_aws(
         {
             "bedrock-agentcore-control": acc,
-            "ec2": StubClient(describe_network_interfaces=lambda **kw: next(enis)),
+            "ec2": StubClient(describe_network_interfaces={"NetworkInterfaces": []}),
         }
     )
 
@@ -565,15 +565,18 @@ def test_cluster_delete_removes_vpc_runtimes_and_waits_for_enis(stub_aws, monkey
 
     ctx = Ctx()
     pc.stage_delete_runtimes(ctx)
-    assert acc.calls == [("delete_agent_runtime", {"agentRuntimeId": "tp_x-1"})]
+    assert acc.calls[-1] == ("delete_agent_runtime", {"agentRuntimeId": "tp_x-1"})
     assert ctx.context["runtimes_deleted"] == {"rt-1": True}  # a retry skips it
+    with session_scope() as s:
+        assert s.get(AgentRuntime, "rt-1").status == "deleting"
+    acc._methods["list_agent_runtimes"] = {"agentRuntimes": []}
+    pc.stage_delete_network(ctx)
     with session_scope() as s:
         assert s.get(AgentRuntime, "rt-1").status == "deleted"
 
 
-def test_cluster_delete_removes_platform_sgs_before_the_stack(stub_aws, monkeypatch):
-    """sg-acr / sg-nlb sit in the stack's VPC: deleting them only after the stack left the
-    VPC undeletable (DELETE_FAILED). In-use SGs are retried once the stack is gone."""
+def test_cluster_delete_starts_stack_while_platform_sgs_are_in_use(stub_aws, monkeypatch):
+    """An in-use platform SG must not hold the CPU system node for hours."""
     from botocore.exceptions import ClientError
 
     from app.pipelines import cluster as pc
@@ -601,34 +604,39 @@ def test_cluster_delete_removes_platform_sgs_before_the_stack(stub_aws, monkeypa
     stub_aws(
         {
             "ec2": StubClient(delete_security_group=delete_sg),
-            "cloudformation": StubClient(delete_stack=delete_stack),
+            "cloudformation": StubClient(
+                delete_stack=delete_stack, list_stack_resources={"StackResourceSummaries": []}
+            ),
         }
     )
     monkeypatch.setattr(
         pc.hp,
         "stack_status",
-        lambda r, n: {"status": "DELETE_IN_PROGRESS"} if stack["alive"] else None,
+        lambda r, n: {"status": "CREATE_COMPLETE", "stack_id": "arn:stack/dev"}
+        if stack["alive"]
+        else None,
     )
 
     class Ctx:
         target_id = "cl-1"
+        context = {"workloads_cleanup_verified": True}
+
+        def set(self, key, value):
+            self.context[key] = value
 
         def log(self, m):
             pass
 
-        def detail(self, m):
-            pass
+        def defer(self, **kwargs):
+            raise InterruptedError
 
-        def sleep(self, s):
-            pass
-
-        def wait_until(self, fn, **kw):
-            while not fn():
-                pass
-
-    # sg-n busy once: retried (wait loop) before the stack delete is issued
-    pc.stage_delete_cluster(Ctx())
-    assert order == ["sg:sg-a", "sg:sg-n", "sg:sg-n", "stack"]
+    ctx = Ctx()
+    with pytest.raises(InterruptedError):
+        pc.stage_delete_compute(ctx)
+    assert order == ["sg:sg-a", "sg:sg-n", "stack"]
+    pc.stage_delete_network(ctx)
+    pc.stage_delete_cluster(ctx)
+    assert order == ["sg:sg-a", "sg:sg-n", "stack", "sg:sg-n"]
 
 
 def test_stack_failure_reason_ignores_earlier_operations(stub_aws):

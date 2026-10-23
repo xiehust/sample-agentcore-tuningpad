@@ -99,7 +99,9 @@ def stack_status(region: str, name: str) -> dict[str, Any] | None:
     try:
         s = aws.client("cloudformation", region).describe_stacks(StackName=name)["Stacks"][0]
     except ClientError as e:
-        if "does not exist" in e.response["Error"].get("Message", ""):
+        if e.response["Error"]["Code"] == "ValidationError" and "does not exist" in e.response[
+            "Error"
+        ].get("Message", ""):
             return None
         raise
     return {
@@ -108,6 +110,82 @@ def stack_status(region: str, name: str) -> dict[str, Any] | None:
         "outputs": {o["OutputKey"]: o["OutputValue"] for o in s.get("Outputs", [])},
         "stack_id": s["StackId"],
     }
+
+
+def stack_resources(region: str, name: str) -> list[dict[str, Any]]:
+    """Current resources of this stack and its surviving nested stacks, with pagination.
+
+    Deleted nested stacks need not be described: their DELETE_COMPLETE status proves
+    their children completed deletion. Propagate permission and transport failures;
+    an unreadable nested stack is never evidence that its resources are gone.
+    """
+    cfn = aws.client("cloudformation", region)
+    resources: list[dict[str, Any]] = []
+    visited: set[str] = set()
+
+    def visit(stack_id: str) -> None:
+        if stack_id in visited:
+            return
+        visited.add(stack_id)
+        token = None
+        children = []
+        while True:
+            kwargs: dict[str, Any] = {"StackName": stack_id}
+            if token:
+                kwargs["NextToken"] = token
+            page = cfn.list_stack_resources(**kwargs)
+            for resource in page.get("StackResourceSummaries", []):
+                resources.append({**resource, "stack_id": stack_id})
+                if (
+                    resource["ResourceType"] == "AWS::CloudFormation::Stack"
+                    and resource["ResourceStatus"] != "DELETE_COMPLETE"
+                    and resource.get("PhysicalResourceId")
+                ):
+                    children.append(resource["PhysicalResourceId"])
+            token = page.get("NextToken")
+            if not token:
+                break
+        for child in children:
+            visit(child)
+
+    visit(name)
+    return resources
+
+
+def stack_delete_failures(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resolve failed nested-stack summaries to their current failing child resources."""
+    failed = [r for r in resources if r.get("ResourceStatus") == "DELETE_FAILED"]
+    failed_owners = {r["stack_id"] for r in failed}
+    return [
+        r
+        for r in failed
+        if r["ResourceType"] != "AWS::CloudFormation::Stack"
+        or r.get("PhysicalResourceId") not in failed_owners
+    ]
+
+
+def network_delete_dependency(resource: dict[str, Any]) -> bool:
+    """Only recognizable EC2 network dependency failures qualify for automatic waiting.
+
+    A nested stack's free-form error is insufficient: callers first resolve it to a
+    concrete failing EC2 resource. Do not mistake an authorization error (even one
+    mentioning dependencies) for asynchronous AgentCore cleanup.
+    """
+    patterns = {
+        "AWS::EC2::Subnet": ("has dependencies and cannot be deleted",),
+        "AWS::EC2::VPC": ("has dependencies and cannot be deleted",),
+        "AWS::EC2::SecurityGroup": ("has a dependent object", "is currently in use"),
+    }
+    allowed = patterns.get(resource.get("ResourceType", ""))
+    if not allowed or not resource.get("PhysicalResourceId"):
+        return False
+    reason = (resource.get("ResourceStatusReason") or "").lower()
+    if any(
+        marker in reason
+        for marker in ("accessdenied", "access denied", "unauthorized", "not authorized")
+    ):
+        return False
+    return "dependencyviolation" in reason or any(marker in reason for marker in allowed)
 
 
 def stack_failure_reason(region: str, name: str) -> str | None:

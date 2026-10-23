@@ -288,6 +288,73 @@ def test_delete_requires_name(client):
     assert client.delete("/api/clusters/cl-1").json()["code"] == "cluster.confirm_name"
 
 
+@pytest.mark.parametrize("status", ["queued", "running", "waiting"])
+def test_repeated_delete_reuses_active_job(client, monkeypatch, status):
+    _cluster_row()
+    with session_scope() as s:
+        s.add(Job(id="job-delete", type="cluster.delete", target_id="cl-1", status=status))
+    monkeypatch.setattr(
+        eng.JobEngine, "start", lambda *a, **kw: pytest.fail("duplicate delete pipeline")
+    )
+    monkeypatch.setattr(
+        eng.JobEngine, "retry", lambda *a, **kw: pytest.fail("active delete must not restart")
+    )
+    assert client.delete("/api/clusters/cl-1?confirm=wrong").status_code == 400
+    response = client.delete("/api/clusters/cl-1?confirm=dev")
+    assert response.status_code == 200
+    assert response.json() == {"job_id": "job-delete"}
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_confirmed_delete_resumes_original_context(client, monkeypatch, status):
+    _cluster_row()
+    context = {"runtimes_deleted": {"rt-1": True}}
+    with session_scope() as s:
+        s.add(
+            Job(
+                id="job-delete",
+                type="cluster.delete",
+                target_id="cl-1",
+                status=status,
+                context=context,
+                stages=[{"name": "workloads", "status": "succeeded"}],
+            )
+        )
+    retried = []
+    monkeypatch.setattr(eng.JobEngine, "retry", lambda self, jid: retried.append(jid))
+    monkeypatch.setattr(
+        eng.JobEngine, "start", lambda *a, **kw: pytest.fail("must retain runtime delete ledger")
+    )
+    response = client.delete("/api/clusters/cl-1?confirm=dev")
+    assert response.status_code == 200
+    assert response.json() == {"job_id": "job-delete"}
+    assert retried == ["job-delete"]
+    with session_scope() as s:
+        assert s.get(Job, "job-delete").context == context
+        assert s.get(Cluster, "cl-1").status == "deleting"
+
+
+def test_concurrent_delete_requests_start_one_job(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services.cluster_deletion import request_delete
+
+    _cluster_row()
+    started = []
+
+    def start(self, job_type, target_id):
+        started.append(target_id)
+        with session_scope() as s:
+            s.add(Job(id="job-delete", type=job_type, target_id=target_id, status="queued"))
+        return "job-delete"
+
+    monkeypatch.setattr(eng.JobEngine, "start", start)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: request_delete("cl-1", "dev"), range(2)))
+    assert results == ["job-delete", "job-delete"]
+    assert started == ["cl-1"]
+
+
 def test_create_requires_region_setup(client):
     r = client.post("/api/clusters", json={"name": "dev", "az_ids": ["use1-az4"]})
     assert r.status_code == 409 and r.json()["code"] == "setup.region_not_ready"
