@@ -18,3 +18,11 @@ dist/
 /.codegraph/
 /.playwright/
 /.claude/skills/playwright-cli/
+# Local reference checkout of strands-decider (not part of TuningPad)
+/strands-decider/
+# Trellis workflow state (local only)
+/.trellis/
+/.agents/
+/.claude/
+/.codex/
+/.kiro/
