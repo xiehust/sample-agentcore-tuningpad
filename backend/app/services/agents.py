@@ -663,8 +663,6 @@ def smoke(
         "passed": passed,
         "total": len(results),
         "results": results,
-        # agent-reported problems that do not fail the smoke (e.g. no access to its model)
-        "warnings": [f"#{r['index']}: {r['warning']}" for r in results if r["warning"]],
         "ok": passed == len(results),
     }
 

@@ -311,16 +311,18 @@ function AgentDetail({ id }: { id: string }) {
               {
                 key: "sm",
                 title: t("agents.smoke"),
-                render: (r) =>
-                  r.last_smoke.total ? (
-                    <Tag
-                      tone={!r.last_smoke.ok ? "red" : r.last_smoke.warnings?.length ? "orange" : "green"}
-                      title={r.last_smoke.warnings?.length ? `${t("agents.smokeWarnings")}: ${r.last_smoke.warnings.join("; ")}` : undefined}
-                    >
-                      {r.last_smoke.passed}/{r.last_smoke.total} · reward {(r.last_smoke.results ?? []).map((x) => JSON.stringify(x.reward ?? x.rewards ?? "✕")).join(", ")}
-                      {r.last_smoke.warnings?.length ? ` · ${t("agents.smokeWarnings")} ${r.last_smoke.warnings.length}` : ""}
+                render: (r) => {
+                  if (!r.last_smoke.total) return "—";
+                  const results = r.last_smoke.results ?? [];
+                  const warns = results.filter((x) => x.warning).map((x) => `#${x.index}: ${x.warning}`);
+                  const tone = !r.last_smoke.ok ? "red" : warns.length ? "orange" : "green";
+                  return (
+                    <Tag tone={tone} title={warns.length ? `${t("agents.smokeWarnings")}: ${warns.join("; ")}` : undefined}>
+                      {r.last_smoke.passed}/{r.last_smoke.total} · reward {results.map((x) => JSON.stringify(x.reward ?? x.rewards ?? "✕")).join(", ")}
+                      {warns.length ? ` · ${t("agents.smokeWarnings")} ${warns.length}` : ""}
                     </Tag>
-                  ) : "—",
+                  );
+                },
               },
               {
                 key: "a",

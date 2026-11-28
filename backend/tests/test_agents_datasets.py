@@ -55,7 +55,12 @@ def test_multi_harness_context_passes_the_contract_checks(toolkit_repo, stub_too
     ctx = svc.prepare_context(agent)
     assert (ctx / "harness_agent" / "rollout.py").is_file()
     cfg = json.loads((ctx / "tp_config.json").read_text())
-    assert cfg == {"tool_bonus_cap": 0.1, "tool_call_budget": 40.0, "harness_max_turns": 200.0}
+    assert cfg == {
+        "tool_bonus_cap": 0.1,
+        "tool_call_budget": 40.0,
+        "harness_max_turns": 200.0,
+        "smoke_bedrock_model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    }
     assert svc.static_checks(ctx) == {"errors": [], "warnings": []}
 
 
@@ -272,8 +277,8 @@ def test_smoke_reports_agent_warnings_without_failing(monkeypatch):
     monkeypatch.setattr(rollouts, "http_client", lambda arn, tps: client)
     monkeypatch.setattr(svc, "bedrock_openai", lambda region: ("https://br/openai/v1", "tok"))
     out = svc.smoke("us-east-1", "arn:rt", [{"prompt": "q"}], lambda m: None)
+    # an agent-reported problem (here: no access to its model) is shown, not failed
     assert out["ok"] and out["results"][0]["warning"] == "bedrock model access denied"
-    assert out["warnings"] == ["#0: bedrock model access denied"]
 
 
 def test_rollout_records_classify_agent_and_invoke_failures(monkeypatch):

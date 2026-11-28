@@ -9,7 +9,7 @@ ARG CLAUDE_CODE_VERSION=2.1.332
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 \
     DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git xz-utils libatomic1 \
+      ca-certificates curl git xz-utils libatomic1 procps util-linux \
     && rm -rf /var/lib/apt/lists/*
 # Node only installs Claude Code (its npm package ships a native linux-arm64 binary)
 RUN curl -fsSLo /tmp/node.tar.xz \
@@ -30,11 +30,12 @@ RUN pip install "$(ls /tmp/agentcore_rl_toolkit-*.whl)[server]" && rm -f /tmp/*.
 WORKDIR /app
 COPY rl_app.py tp_config.json /app/
 COPY harness_agent /app/harness_agent
-# Claude Code refuses --dangerously-skip-permissions as root: run as an ordinary user
-RUN useradd -m -u 1000 -d /home/user user \
+# The agent runs as root and starts each Harness as the unprivileged `harness` user (which
+# Claude Code also needs for --dangerously-skip-permissions). The Harness owns only /workdir
+# and its HOME; it can read the inputs but not write /tests or /logs, where the Verifier runs.
+RUN useradd -m -u 1001 -d /home/harness harness \
     && mkdir -p /workdir /home/user/input /tests /logs \
-    && chown -R user:user /workdir /home/user /tests /logs /app
-USER user
-ENV HOME=/home/user
+    && chown harness:harness /workdir \
+    && chmod 755 /home/user /home/user/input /tests /logs
 EXPOSE 8080
 CMD ["python", "-m", "rl_app"]

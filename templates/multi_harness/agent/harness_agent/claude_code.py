@@ -14,8 +14,10 @@ import json
 import os
 from dataclasses import dataclass
 
+from .procenv import base_env
+
 NAME = "claude_code"
-SMOKE_BEDROCK_MODEL = "anthropic.claude-haiku-4-5-20251001-v1:0"
+HOME = "/home/harness"  # the Harness user's home (see rollout.HARNESS_USER)
 _MODEL_VARS = (
     "ANTHROPIC_MODEL",
     "ANTHROPIC_SMALL_FAST_MODEL",
@@ -30,7 +32,8 @@ _QUIET = {
     "DISABLE_ERROR_REPORTING": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 }
-_ACCESS_ERRORS = ("accessdenied", "don't have access", "not authorized", "is not available")
+# Substrings of Claude Code's error result when the smoke model cannot be used
+_ACCESS_ERRORS = ("access", "denied", "not authorized", "model identifier", "not available")
 
 
 @dataclass(frozen=True)
@@ -46,20 +49,10 @@ class Parsed:
     warning: str | None
 
 
-def _bedrock_profile(region: str) -> str:
-    prefix = "eu" if region.startswith("eu-") else "apac" if region.startswith("ap-") else "us"
-    return f"{prefix}.{SMOKE_BEDROCK_MODEL}"
-
-
-def build(prompt: str, config: dict, *, region: str, max_turns: int) -> Launch:
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/home/user"),
-        "LANG": "C.UTF-8",
-        **_QUIET,
-    }
+def build(prompt: str, config: dict, *, region: str, max_turns: int, smoke_model: str) -> Launch:
+    env = {**base_env(HOME), **_QUIET}
     if config.get("smoke"):
-        model = _bedrock_profile(region)
+        model = smoke_model
         env |= {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": region}
         env |= {k: v for k, v in os.environ.items() if k.startswith("AWS_") and k != "AWS_REGION"}
     else:

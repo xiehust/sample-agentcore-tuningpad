@@ -24,6 +24,10 @@ params:
     default: 200
     min: 1
     max: 10000
+  - key: smoke_bedrock_model
+    type: text
+    label: {en: "Bedrock model Claude Code uses in the smoke test", zh-CN: "smoke test 中 Claude Code 使用的 Bedrock 模型"}
+    default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 payload:
   prompt_field: null           # payload carries S3 URIs; the prompt column is the Task instruction
   required: [task_id, task_uri, input_uri]

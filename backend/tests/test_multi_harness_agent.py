@@ -36,6 +36,7 @@ GATEWAY = {
         (1.0, 40, 1.0),  # at the budget: no bonus
         (1.0, 90, 1.0),  # past the budget: still no bonus, never negative
         (0.0, 1, 0.0),  # wrong: no bonus, so giving up early earns nothing
+        (0.5, 1, 0.0),  # not correct counts as wrong
         (None, 3, None),  # Verifier produced nothing: unscorable, not wrong
     ],
 )
@@ -47,8 +48,13 @@ def test_reward_adds_a_tool_efficiency_bonus_only_to_correct_answers(verifier, c
 # ---------------- S9: Claude Code launch ----------------
 
 
+SMOKE_MODEL = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
 def test_claude_code_talks_to_the_gateway_with_the_session_key():
-    launch = claude_code.build("Solve it", GATEWAY, region="us-east-1", max_turns=200)
+    launch = claude_code.build(
+        "Solve it", GATEWAY, region="us-east-1", max_turns=200, smoke_model=SMOKE_MODEL
+    )
     env = launch.env
     # Claude Code appends /v1/messages itself
     assert env["ANTHROPIC_BASE_URL"] == "http://10.0.0.5:18765"
@@ -78,13 +84,13 @@ def test_claude_code_talks_to_the_gateway_with_the_session_key():
     assert launch.cmd[launch.cmd.index("--max-turns") + 1] == "200"
 
 
-def test_claude_code_smoke_uses_bedrock_haiku_for_the_region(monkeypatch):
+def test_claude_code_smoke_uses_the_configured_bedrock_model(monkeypatch):
     monkeypatch.setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.2/creds")
     cfg = {**GATEWAY, "smoke": True, "model_id": "openai.gpt-oss-20b-1:0"}
-    env = claude_code.build("q", cfg, region="eu-west-1", max_turns=5).env
+    env = claude_code.build("q", cfg, region="eu-west-1", max_turns=5, smoke_model=SMOKE_MODEL).env
     assert env["CLAUDE_CODE_USE_BEDROCK"] == "1"
     assert env["AWS_REGION"] == "eu-west-1"
-    assert env["ANTHROPIC_MODEL"] == f"eu.{claude_code.SMOKE_BEDROCK_MODEL}"
+    assert env["ANTHROPIC_MODEL"] == SMOKE_MODEL
     assert "ANTHROPIC_BASE_URL" not in env and "ANTHROPIC_API_KEY" not in env
     # Bedrock needs the runtime role's credentials, so smoke passes them through
     assert env["AWS_CONTAINER_CREDENTIALS_FULL_URI"] == "http://169.254.170.2/creds"
@@ -142,6 +148,19 @@ def test_stream_parser_turns_a_bedrock_access_error_into_a_warning():
     assert parsed.warning and "access" in parsed.warning.lower()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "API Error: 400 Model access is denied for this account",
+        "API Error (403): User is not authorized to perform: bedrock:InvokeModel",
+        "ValidationException: The provided model identifier is invalid.",
+    ],
+)
+def test_other_bedrock_access_errors_are_warnings_too(text):
+    out = _stream({"type": "result", "is_error": True, "result": text})
+    assert claude_code.parse(out).warning
+
+
 # ---------------- S8: one rollout ----------------
 
 TASK_TOML = """
@@ -154,6 +173,14 @@ EXPECTED_ANSWER = "42"
 [agent]
 timeout_sec = 60.0
 """
+
+
+PARAMS = {
+    "tool_bonus_cap": 0.1,
+    "tool_call_budget": 40,
+    "harness_max_turns": 200,
+    "smoke_bedrock_model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+}
 
 
 @pytest.fixture
@@ -202,24 +229,49 @@ def world(tmp_path):
 class FakeProcesses:
     """Plays the harness and the Verifier; records what each could see."""
 
-    def __init__(self, paths: rollout.Paths, *, verifier_reward: str | None = "1.0"):
+    def __init__(
+        self,
+        paths: rollout.Paths,
+        *,
+        verifier_reward: str | None = "1.0",
+        tamper=False,
+        answer=True,
+        stream=None,
+    ):
         self.paths = paths
         self.verifier_reward = verifier_reward
+        self.tamper = tamper
+        self.answer = answer
+        self.stream = stream
         self.calls: list[dict] = []
+        self.killed: list[str] = []
 
-    def __call__(self, cmd, *, env, cwd, stdin, timeout):
+    def kill_user(self, user: str) -> None:
+        self.killed.append(user)
+        self.calls.append({"killed": user})
+
+    def __call__(self, cmd, *, env, cwd, stdin, timeout, user=None):
         seen = {
             "cmd": cmd,
             "env": env,
             "cwd": cwd,
             "timeout": timeout,
+            "user": user,
             "inputs": sorted(p.name for p in self.paths.inputs.iterdir()),
             "tests_visible": self.paths.tests.exists() and any(self.paths.tests.iterdir()),
         }
         self.calls.append(seen)
         if cmd[0] == "claude":
-            (self.paths.workdir / "answer.txt").write_text("42")
-            return rollout.Completed(0, _stream(_tool(), _tool(), {"type": "result"}), "")
+            if self.answer:
+                (self.paths.workdir / "answer.txt").write_text("42")
+            if self.tamper:  # a reward hack: pre-write the Verifier's output and a test
+                (self.paths.logs / "verifier").mkdir(parents=True, exist_ok=True)
+                (self.paths.logs / "verifier" / "reward.txt").write_text("1.0")
+                (self.paths.tests / "test.sh").write_text("exit 0\n")
+            stream = self.stream or _stream(_tool(), _tool(), {"type": "result"})
+            return rollout.Completed(0, stream, "")
+        seen["tests_listing"] = sorted(p.name for p in self.paths.tests.iterdir())
+        seen["test_sh"] = (self.paths.tests / "test.sh").read_text()
         if self.verifier_reward is not None:
             (self.paths.logs / "verifier").mkdir(parents=True, exist_ok=True)
             (self.paths.logs / "verifier" / "reward.txt").write_text(self.verifier_reward)
@@ -230,15 +282,22 @@ def test_a_rollout_runs_the_harness_then_the_verifier(world):
     procs = FakeProcesses(world["paths"])
     out = rollout.run_rollout(
         world["payload"],
-        params={"tool_bonus_cap": 0.1, "tool_call_budget": 40, "harness_max_turns": 200},
+        params=PARAMS,
         paths=world["paths"],
         read=world["read"],
         fetch_tree=world["fetch_tree"],
         run=procs,
+        kill_user=procs.kill_user,
         region="us-east-1",
     )
-    harness, verifier = procs.calls
+    harness, killed, verifier = procs.calls
     assert harness["cmd"][0] == "claude" and harness["inputs"] == ["data.csv"]
+    # the Harness runs as its own user; whatever it left running is killed before grading
+    assert harness["user"] == rollout.HARNESS_USER and verifier["user"] is None
+    assert killed == {"killed": rollout.HARNESS_USER}
+    # the Verifier gets a fresh HOME, so nothing the Harness planted in its HOME loads
+    assert verifier["env"]["HOME"] != harness["env"]["HOME"]
+    assert verifier["env"]["PYTHONNOUSERSITE"] == "1"
     assert harness["cwd"] == world["paths"].workdir
     assert harness["timeout"] == 60.0  # the Task's own agent timeout
     # the Verifier is staged only after the harness exits
@@ -255,11 +314,12 @@ def test_a_rollout_runs_the_harness_then_the_verifier(world):
 def test_a_rollout_without_a_verifier_result_is_unscorable(world):
     out = rollout.run_rollout(
         world["payload"],
-        params={"tool_bonus_cap": 0.1, "tool_call_budget": 40, "harness_max_turns": 200},
+        params=PARAMS,
         paths=world["paths"],
         read=world["read"],
         fetch_tree=world["fetch_tree"],
-        run=FakeProcesses(world["paths"], verifier_reward=None),
+        run=(p := FakeProcesses(world["paths"], verifier_reward=None)),
+        kill_user=p.kill_user,
         region="us-east-1",
     )
     assert out["reward"] is None and out["stop_reason"] == "verifier_no_result"
@@ -273,11 +333,12 @@ def test_a_rollout_starts_from_clean_directories(world):
     procs = FakeProcesses(paths)
     rollout.run_rollout(
         world["payload"],
-        params={"tool_bonus_cap": 0.1, "tool_call_budget": 40, "harness_max_turns": 200},
+        params=PARAMS,
         paths=paths,
         read=world["read"],
         fetch_tree=world["fetch_tree"],
         run=procs,
+        kill_user=procs.kill_user,
         region="us-east-1",
     )
     assert procs.calls[0]["inputs"] == ["data.csv"]
@@ -288,10 +349,64 @@ def test_a_payload_naming_an_uninstalled_harness_fails(world):
     with pytest.raises(rollout.HarnessUnavailable):
         rollout.run_rollout(
             {**world["payload"], "harness": "codex"},
-            params={"tool_bonus_cap": 0.1, "tool_call_budget": 40, "harness_max_turns": 200},
+            params=PARAMS,
             paths=world["paths"],
             read=world["read"],
             fetch_tree=world["fetch_tree"],
-            run=FakeProcesses(world["paths"]),
+            run=(p := FakeProcesses(world["paths"])),
+            kill_user=p.kill_user,
             region="us-east-1",
         )
+
+
+def _run(world, procs, payload=None):
+    return rollout.run_rollout(
+        payload or world["payload"],
+        params=PARAMS,
+        paths=world["paths"],
+        read=world["read"],
+        fetch_tree=world["fetch_tree"],
+        run=procs,
+        kill_user=procs.kill_user,
+        region="us-east-1",
+    )
+
+
+def test_what_the_harness_writes_into_the_verifier_dirs_is_discarded(world):
+    procs = FakeProcesses(world["paths"], tamper=True, verifier_reward=None)
+    out = _run(world, procs)
+    verifier = procs.calls[-1]
+    assert verifier["test_sh"] == "#!/bin/sh\n"  # the Task's own test.sh, not the planted one
+    assert out["reward"] is None  # the planted reward.txt was cleared before grading
+
+
+def test_smoke_without_an_answer_fails_unless_the_model_was_unavailable(world):
+    smoke = {**world["payload"], "_config": {**GATEWAY, "smoke": True}}
+    out = _run(world, FakeProcesses(world["paths"], answer=False, verifier_reward="0.0"), smoke)
+    assert out["reward"] is None and out["stop_reason"] == "harness_no_answer"
+
+    denied = _stream({"type": "result", "is_error": True, "result": "403 AccessDeniedException"})
+    procs = FakeProcesses(world["paths"], answer=False, verifier_reward="0.0", stream=denied)
+    out = _run(world, procs, smoke)
+    assert out["reward"] == 0.0 and out["warning"]
+
+
+def test_smoke_caps_the_harness_time_below_the_smoke_timeout(world):
+    smoke = {**world["payload"], "_config": {**GATEWAY, "smoke": True}}
+    procs = FakeProcesses(world["paths"])
+    _run(world, procs, smoke)
+    assert procs.calls[0]["timeout"] == min(60.0, rollout.SMOKE_HARNESS_TIMEOUT_S)
+
+
+def test_a_harness_killed_at_the_timeout_takes_its_children_with_it(tmp_path):
+    import time
+
+    start = time.monotonic()
+    done = rollout.run_process(
+        ["sh", "-c", "sleep 30 & sleep 30"],
+        env={"PATH": "/usr/bin:/bin"},
+        cwd=tmp_path,
+        stdin="",
+        timeout=0.5,
+    )
+    assert done.returncode is None and time.monotonic() - start < 10

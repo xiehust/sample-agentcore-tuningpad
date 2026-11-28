@@ -8,10 +8,10 @@ def score(
 ) -> float | None:
     """None when the Verifier produced no result (unscorable, not wrong). A correct answer
     (Verifier score >= 1) earns up to `cap` more, shrinking linearly to 0 at `budget` tool
-    calls; anything else keeps the Verifier's score, so giving up early earns nothing."""
+    calls; anything else scores 0, so giving up early earns nothing."""
     if verifier_reward is None:
         return None
     if verifier_reward < 1.0:
-        return float(verifier_reward)
+        return 0.0
     used = min(max(tool_calls, 0), budget) / budget if budget > 0 else 1.0
     return float(verifier_reward) + cap * (1.0 - used)

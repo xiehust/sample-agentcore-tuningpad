@@ -1,8 +1,13 @@
 """One rollout: stage the Task, run the Harness, then run the Verifier and score.
 
-The Harness never sees the Verifier: `task.toml` (which holds the expected answer in the
-Verifier's env) is read into memory only, and `tests/` is downloaded after the Harness
-exits. Each AgentCore session is its own microVM; directories are still cleared first.
+The Harness cannot see or influence the Verifier:
+- it runs as its own unprivileged user (HARNESS_USER); this process (root) and the
+  Verifier's directories are not its own, so it can read neither the agent's environment
+  (AWS credentials) nor write /tests or /logs;
+- `task.toml` (the expected answer is in the Verifier's env) is only read into memory;
+- after it exits, every process of its user is killed, /tests and /logs are cleared, and
+  only then is the Verifier downloaded and run, with a fresh HOME and no user site-packages.
+Each AgentCore session is its own microVM; directories are still cleared first.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ import os
 import shutil
 import signal
 import subprocess
+import tempfile
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,9 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from . import claude_code, reward
+from .procenv import base_env
 
 HARNESSES = {claude_code.NAME: claude_code}
+HARNESS_USER = "harness"
 DEFAULT_HARNESS_TIMEOUT_S = 1200.0
+# TuningPad's smoke waits 600s per rollout; leave room for staging and the Verifier
+SMOKE_HARNESS_TIMEOUT_S = 300.0
 DEFAULT_VERIFIER_TIMEOUT_S = 120.0
 
 
@@ -54,8 +64,19 @@ class Completed:
 Run = Callable[..., Completed]
 
 
-def run_process(cmd: list[str], *, env: dict, cwd: Path, stdin: str, timeout: float) -> Completed:
-    """Run in its own process group so a timeout also kills whatever it spawned."""
+def run_process(
+    cmd: list[str],
+    *,
+    env: dict,
+    cwd: Path,
+    stdin: str,
+    timeout: float,
+    user: str | None = None,
+) -> Completed:
+    """Run in its own process group so a timeout also kills whatever it spawned; with
+    `user`, drop to that user first (this process runs as root in the Agent image)."""
+    if user:
+        cmd = ["setpriv", f"--reuid={user}", f"--regid={user}", "--init-groups", *cmd]
     proc = subprocess.Popen(
         cmd,
         env=env,
@@ -75,8 +96,13 @@ def run_process(cmd: list[str], *, env: dict, cwd: Path, stdin: str, timeout: fl
         return Completed(None, out, err)
 
 
-def _clear(paths: Paths) -> None:
-    for d in (paths.workdir, paths.inputs, paths.tests, paths.logs):
+def kill_user_processes(user: str) -> None:
+    """Whatever the Harness left behind (detached or not) must not outlive it."""
+    subprocess.run(["pkill", "-KILL", "-u", user], check=False)
+
+
+def _clear(*dirs: Path) -> None:
+    for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
         for child in d.iterdir():
             if child.is_dir() and not child.is_symlink():
@@ -107,6 +133,7 @@ def run_rollout(
     read: Callable[[str], bytes],
     fetch_tree: Callable[[str, Path], None],
     run: Run,
+    kill_user: Callable[[str], None],
     region: str,
 ) -> dict[str, Any]:
     config = payload["_config"]
@@ -115,41 +142,52 @@ def run_rollout(
     instruction = read(f"{task_uri}instruction.md").decode()
     task = tomllib.loads(read(f"{task_uri}task.toml").decode())
 
-    _clear(paths)
+    _clear(paths.workdir, paths.inputs, paths.tests, paths.logs)
     fetch_tree(payload["input_uri"], paths.inputs)
 
+    smoke = bool(config.get("smoke"))
     launch = harness.build(
-        instruction, config, region=region, max_turns=int(params["harness_max_turns"])
+        instruction,
+        config,
+        region=region,
+        max_turns=int(params["harness_max_turns"]),
+        smoke_model=params["smoke_bedrock_model"],
     )
     agent_timeout = (task.get("agent") or {}).get("timeout_sec") or DEFAULT_HARNESS_TIMEOUT_S
+    cap = SMOKE_HARNESS_TIMEOUT_S if smoke else DEFAULT_HARNESS_TIMEOUT_S
     done = run(
         launch.cmd,
         env=launch.env,
         cwd=paths.workdir,
         stdin=launch.stdin,
-        timeout=min(float(agent_timeout), DEFAULT_HARNESS_TIMEOUT_S),
+        timeout=min(float(agent_timeout), cap),
+        user=HARNESS_USER,
     )
+    kill_user(HARNESS_USER)
     parsed = harness.parse(done.stdout)
+    answer = paths.workdir / "answer.txt"
+    answered = answer.is_file() and not answer.is_symlink() and answer.stat().st_size > 0
 
-    # The Harness has exited: only now does the Verifier exist on disk.
+    # The Harness is gone: discard anything it put where the Verifier runs, then stage it.
+    _clear(paths.tests, paths.logs)
     fetch_tree(f"{task_uri}tests/", paths.tests)
     verifier = task.get("verifier") or {}
-    venv = {
-        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/home/user"),
-        "LANG": "C.UTF-8",
-        # test.sh may `pip install` what the image already has; never reach for PyPI
-        "PIP_NO_INDEX": "1",
-        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-        **{k: str(v) for k, v in (verifier.get("env") or {}).items()},
-    }
-    run(
-        ["bash", str(paths.tests / "test.sh")],
-        env=venv,
-        cwd=paths.workdir,
-        stdin="",
-        timeout=float(verifier.get("timeout_sec") or DEFAULT_VERIFIER_TIMEOUT_S),
-    )
+    with tempfile.TemporaryDirectory(prefix="verifier-home-") as home:
+        verifier_env = {
+            **base_env(home),
+            "PYTHONNOUSERSITE": "1",
+            # test.sh may `pip install` what the image already has; never reach for PyPI
+            "PIP_NO_INDEX": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            **{k: str(v) for k, v in (verifier.get("env") or {}).items()},
+        }
+        run(
+            ["bash", str(paths.tests / "test.sh")],
+            env=verifier_env,
+            cwd=paths.workdir,
+            stdin="",
+            timeout=float(verifier.get("timeout_sec") or DEFAULT_VERIFIER_TIMEOUT_S),
+        )
     verifier_reward = _verifier_reward(paths)
     score = reward.score(
         verifier_reward,
@@ -157,6 +195,13 @@ def run_rollout(
         cap=float(params["tool_bonus_cap"]),
         budget=int(params["tool_call_budget"]),
     )
+    if verifier_reward is None:
+        stop_reason = "verifier_no_result"
+    elif smoke and not answered and not parsed.warning:
+        # smoke proves the Harness can write an answer; a 0 from an empty answer does not
+        score, stop_reason = None, "harness_no_answer"
+    else:
+        stop_reason = "harness_timeout" if done.returncode is None else "completed"
     out: dict[str, Any] = {
         "reward": score,
         "harness": harness.NAME,
@@ -165,10 +210,8 @@ def run_rollout(
             "verifier_reward": verifier_reward,
             "correct": int(verifier_reward is not None and verifier_reward >= 1.0),
         },
-        "stop_reason": "harness_timeout" if done.returncode is None else "completed",
+        "stop_reason": stop_reason,
     }
-    if verifier_reward is None:
-        out["stop_reason"] = "verifier_no_result"
     if parsed.warning:
         out["warning"] = parsed.warning
     return out

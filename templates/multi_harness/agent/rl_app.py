@@ -52,6 +52,7 @@ def invoke_agent(payload: dict, context):
         read=read,
         fetch_tree=fetch_tree,
         run=rollout.run_process,
+        kill_user=rollout.kill_user_processes,
         region=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
     )
     logger.info(
