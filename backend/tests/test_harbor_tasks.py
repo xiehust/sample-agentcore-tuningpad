@@ -89,7 +89,13 @@ def s3_stub(existing: dict[str, int] | None = None):
         local, _bucket, key = _args
         existing[key] = Path(local).stat().st_size
 
-    return StubClient(list_objects_v2=list_objects_v2, upload_file=upload_file), existing
+    def put_object(Bucket, Key, Body):
+        existing[Key] = len(Body)
+
+    stub = StubClient(
+        list_objects_v2=list_objects_v2, upload_file=upload_file, put_object=put_object
+    )
+    return stub, existing
 
 
 @pytest.fixture
@@ -177,6 +183,25 @@ def test_each_input_prefix_is_uploaded_once_and_reused_on_rerun(hub, stub_aws):
     assert fake.downloaded_prefixes == []
     assert not [c for c in s3_rerun.calls if c[0] == "upload_file"]
     assert uploads > 0
+
+
+def test_an_input_prefix_left_partial_by_a_crash_is_completed_on_rerun(hub, stub_aws):
+    fake = hub(
+        FakeHub(
+            {
+                harbor.SMOL_TRAIN: manifest_rows(1, ["easy"]),
+                harbor.SMOL_TEST: manifest_rows(1, ["easy"]),
+            },
+            sizes={"owner__ds0": 10},
+        )
+    )
+    # a previous run died after uploading only part of the prefix
+    partial = {"datasets/ds-1/smoldataenvs/inputs/owner__ds0/other.csv": 3}
+    s3, stored = s3_stub(partial)
+    stub_aws({"s3": s3})
+    harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+    assert fake.downloaded_prefixes == ["owner__ds0"]
+    assert "datasets/ds-1/smoldataenvs/inputs/owner__ds0/data.csv" in stored
 
 
 def test_tasks_whose_inputs_exceed_the_cap_are_skipped(hub, stub_aws):

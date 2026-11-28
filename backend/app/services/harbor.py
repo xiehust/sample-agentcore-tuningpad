@@ -260,11 +260,15 @@ def smoldataenvs_rows(
         )
         for n, p in enumerate(prefixes, 1):
             key = f"{base}/inputs/{p}/"
-            if _existing(s3, bucket, key):
+            # Written only after the whole prefix is uploaded, so a crash mid-prefix is
+            # resumed; kept outside inputs/ so it never lands in the Task's input dir.
+            done = f"{base}/inputs-complete/{p}"
+            if _existing(s3, bucket, done):
                 continue
             local = Path(tmp) / "inputs" / p
             hub.download_prefix(p, local)
             _upload_tree(s3, local, bucket, key)
+            s3.put_object(Bucket=bucket, Key=done, Body=b"")
             for f in sorted(local.rglob("*"), reverse=True):
                 f.unlink() if f.is_file() else f.rmdir()
             log(f"inputs {n}/{len(prefixes)}: {p}")

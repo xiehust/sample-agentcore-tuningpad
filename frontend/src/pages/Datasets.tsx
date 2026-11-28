@@ -99,6 +99,8 @@ function CreateDataset() {
       ? { train_tasks: trainTasks ? Number(trainTasks) : null, all_tasks: allTasks, max_input_gb: maxInputGb ? Number(maxInputGb) : null }
       : {}),
   });
+  // SmolDataEnvs imports move GBs: show the size for the current options before allowing one
+  const needsEstimate = mode === "builtin" && builtinKind === "smoldataenvs" && !estimate;
   const runEstimate = async () => {
     setEstimating(true);
     try {
@@ -143,7 +145,7 @@ function CreateDataset() {
       <FlowHeader
         title={t("datasets.create")}
         onBack={() => navigate("/datasets")}
-        end={<Button kind="primary" disabled={busy} onClick={() => void submit()} testId="tp-dataset-submit">{t("datasets.createConfirm")}</Button>}
+        end={<Button kind="primary" disabled={busy || needsEstimate} onClick={() => void submit()} testId="tp-dataset-submit">{t("datasets.createConfirm")}</Button>}
       />
       <div className="tp-stack">
         <Card title={t("datasets.mode")}>
@@ -184,6 +186,7 @@ function CreateDataset() {
                 </div>
                 <div className="tp-row" style={{ marginTop: 12 }}>
                   <Button disabled={estimating} onClick={() => void runEstimate()} testId="tp-dataset-estimate">{t("datasets.smolEstimate")}</Button>
+                  {!estimate && <span>{t("datasets.smolEstimateFirst")}</span>}
                   {estimate && (
                     <span>{t("datasets.smolEstimateResult", { train: num(estimate.train), test: num(estimate.test), skipped: num(estimate.skipped), gb: (estimate.input_bytes / 1024 ** 3).toFixed(1) })}</span>
                   )}

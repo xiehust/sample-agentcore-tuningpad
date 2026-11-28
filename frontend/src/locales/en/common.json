@@ -149,7 +149,8 @@
     "node.replace_failed": "The node could not be replaced",
     "dataset.harbor_mixed_images": "These Tasks do not share one environment image. TuningPad only accepts Task sets with a single shared image.",
     "dataset.harbor_invalid_task": "A Task is not in the expected Harbor format or its input files are missing.",
-    "dataset.no_estimate": "This built-in dataset has no size estimate."
+    "dataset.no_estimate": "This built-in dataset has no size estimate.",
+    "agent.overlay_link": "The template's agent overlay contains a link. Template overlays must contain only regular files and directories."
   },
   "common": {
     "apply": "Apply",
@@ -624,7 +625,8 @@
     "smolAllHint": "All 5,000 train Tasks (about 30 GB of input files)",
     "smolEstimate": "Estimate",
     "smolEstimateResult": "{{train}} train + {{test}} test Tasks, {{skipped}} skipped, {{gb}} GB of input files",
-    "smolLicense": "SmolDataEnvs is MIT-licensed. Its input files come from Kaggle datasets, each under its own license."
+    "smolLicense": "SmolDataEnvs is MIT-licensed. Its input files come from Kaggle datasets, each under its own license.",
+    "smolEstimateFirst": "Estimate the size before importing."
   },
   "runs": {
     "create": "New training run",

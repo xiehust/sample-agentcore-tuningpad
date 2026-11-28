@@ -149,7 +149,8 @@
     "node.replace_failed": "节点替换失败",
     "dataset.harbor_mixed_images": "这些 Task 不共用同一个环境镜像。TuningPad 只接受共用单一镜像的 Task 集。",
     "dataset.harbor_invalid_task": "有 Task 不符合预期的 Harbor 格式，或者找不到它的输入文件。",
-    "dataset.no_estimate": "这个内置数据集没有数据量估算。"
+    "dataset.no_estimate": "这个内置数据集没有数据量估算。",
+    "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。"
   },
   "common": {
     "apply": "应用",
@@ -624,7 +625,8 @@
     "smolAllHint": "全部 5000 个 train Task（输入文件约 30 GB）",
     "smolEstimate": "估算",
     "smolEstimateResult": "{{train}} 个 train + {{test}} 个 test Task，跳过 {{skipped}} 个，输入文件 {{gb}} GB",
-    "smolLicense": "SmolDataEnvs 采用 MIT 许可。输入文件来自 Kaggle 数据集，各有各的许可。"
+    "smolLicense": "SmolDataEnvs 采用 MIT 许可。输入文件来自 Kaggle 数据集，各有各的许可。",
+    "smolEstimateFirst": "导入前请先估算数据量。"
   },
   "runs": {
     "create": "新建训练任务",
