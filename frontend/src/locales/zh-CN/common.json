@@ -151,7 +151,8 @@
     "dataset.harbor_invalid_task": "有 Task 不符合预期的 Harbor 格式，或者找不到它的输入文件。",
     "dataset.no_estimate": "这个内置数据集没有数据量估算。",
     "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。",
-    "run.bad_history_mode": "History 模式只能是 linear 或 tree。"
+    "run.bad_history_mode": "History 模式只能是 linear 或 tree。",
+    "template.invalid_param": "模板参数的取值无效。"
   },
   "common": {
     "apply": "应用",

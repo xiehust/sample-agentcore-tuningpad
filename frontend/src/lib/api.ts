@@ -471,9 +471,9 @@ export type Localized = { en: string; "zh-CN": string };
 
 export interface TemplateParam {
   key: string;
-  type: "text" | "select" | "number";
+  type: "text" | "select" | "multiselect" | "number";
   label: Localized;
-  default: string | number;
+  default: string | number | string[];
   options?: string[];
   min?: number;
   max?: number;

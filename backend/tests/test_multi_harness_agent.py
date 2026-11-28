@@ -16,7 +16,14 @@ from app.core.config import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "templates" / "multi_harness" / "agent"))
 
-from harness_agent import claude_code, reward, rollout  # noqa: E402
+from harness_agent import (  # noqa: E402
+    claude_code,
+    install,
+    mini_swe_agent,
+    opencode,
+    reward,
+    rollout,
+)
 
 GATEWAY = {
     "base_url": "http://10.0.0.5:18765/v1",
@@ -263,7 +270,7 @@ class FakeProcesses:
             "tests_visible": self.paths.tests.exists() and any(self.paths.tests.iterdir()),
         }
         self.calls.append(seen)
-        if cmd[0] == "claude":
+        if user is not None:  # the Harness runs as its own user; the Verifier does not
             if self.answer:
                 (self.paths.workdir / "answer.txt").write_text("42")
             if self.tamper:  # a reward hack: pre-write the Verifier's output and a test
@@ -439,3 +446,136 @@ def test_metrics_are_all_numbers_even_without_a_verifier_result(world):
     out = _run(world, FakeProcesses(world["paths"], verifier_reward=None))
     assert all(isinstance(v, int | float) for v in out["metrics"].values())
     assert "verifier_reward" not in out["metrics"]
+
+
+# ---------------- S17: OpenCode and Mini-SWE-Agent ----------------
+
+
+def test_opencode_runs_against_the_gateway_with_a_written_config():
+    launch = opencode.build("Solve it", GATEWAY, region="us-east-1", max_turns=200, smoke_model="x")
+    cfg = json.loads(launch.files[opencode.CONFIG_PATH])
+    provider = cfg["provider"]["tp"]
+    assert provider["options"] == {"baseURL": "http://10.0.0.5:18765/v1", "apiKey": "sid-123"}
+    assert provider["npm"] == "@ai-sdk/openai-compatible"
+    assert "Qwen/Qwen3.5-4B" in provider["models"]
+    # the title / small-model calls go to the policy too
+    assert cfg["model"] == cfg["small_model"] == "tp/Qwen/Qwen3.5-4B"
+    assert cfg["autoupdate"] is False and cfg["share"] == "disabled"
+    assert launch.env["OPENCODE_CONFIG"] == str(opencode.CONFIG_PATH)
+    assert not any(k.startswith("AWS_") for k in launch.env)
+    assert launch.cmd[:2] == ["opencode", "run"] and launch.cmd[-1] == "Solve it"
+    assert launch.cmd[launch.cmd.index("--format") + 1] == "json"
+    assert launch.cmd[launch.cmd.index("-m") + 1] == "tp/Qwen/Qwen3.5-4B"
+
+
+def test_opencode_counts_tool_use_events():
+    out = "\n".join(
+        json.dumps(e)
+        for e in [
+            {"type": "step_start"},
+            {"type": "tool_use", "part": {"tool": "bash"}},
+            {"type": "tool_use", "part": {"tool": "read"}},
+            {"type": "text", "part": {"text": "done"}},
+            {"type": "step_finish"},
+        ]
+    )
+    assert opencode.parse(out).tool_calls == 2
+
+
+def test_mini_swe_agent_runs_against_the_gateway():
+    launch = mini_swe_agent.build(
+        "Solve it", GATEWAY, region="us-east-1", max_turns=50, smoke_model="x"
+    )
+    cmd = launch.cmd
+    assert cmd[0] == mini_swe_agent.MINI_BIN
+    assert {"-y", "--exit-immediately"} <= set(cmd)
+    assert cmd[cmd.index("-l") + 1] == "0"  # no cost limit (self-hosted policy)
+    assert cmd[cmd.index("-m") + 1] == "openai/Qwen/Qwen3.5-4B"
+    assert cmd[cmd.index("-t") + 1] == "Solve it"
+    configs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-c"]
+    assert configs[0] == "mini.yaml"
+    assert "model.model_kwargs.api_base=http://10.0.0.5:18765/v1" in configs
+    assert "model.model_kwargs.api_key=sid-123" in configs
+    assert "agent.step_limit=50" in configs
+    assert cmd[cmd.index("-o") + 1] == str(launch.output_file)
+    assert launch.env["MSWEA_COST_TRACKING"] == "ignore_errors"
+    assert launch.env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"  # no network fetch
+
+
+def test_mini_swe_agent_counts_tool_calls_in_its_trajectory():
+    traj = {
+        "info": {"exit_status": "Submitted"},
+        "messages": [
+            {"role": "system"},
+            {"role": "user"},
+            {"role": "assistant", "tool_calls": [{"id": "1"}]},
+            {"role": "tool"},
+            {"role": "assistant", "tool_calls": [{"id": "2"}, {"id": "3"}]},
+            {"role": "tool"},
+            {"role": "exit"},
+        ],
+    }
+    assert mini_swe_agent.parse(json.dumps(traj)).tool_calls == 3
+    assert mini_swe_agent.parse("").tool_calls == 0  # no trajectory written
+
+
+# ---------------- S18: harness selection and files ----------------
+
+
+def _harness_run(world, harness, params=None):
+    procs = FakeProcesses(world["paths"])
+    written = {}
+
+    def write_file(path, content):
+        written[path] = content
+
+    out = rollout.run_rollout(
+        {**world["payload"], "harness": harness},
+        params={
+            **PARAMS,
+            "harnesses": ["claude_code", "opencode", "mini_swe_agent"],
+            **(params or {}),
+        },
+        paths=world["paths"],
+        read=world["read"],
+        fetch_tree=world["fetch_tree"],
+        run=procs,
+        kill_user=procs.kill_user,
+        region="us-east-1",
+        write_file=write_file,
+        read_output=lambda path: json.dumps(
+            {"messages": [{"role": "assistant", "tool_calls": [{}]}]}
+        ),
+    )
+    return out, procs, written
+
+
+def test_the_payload_picks_the_harness(world):
+    out, procs, written = _harness_run(world, "opencode")
+    assert procs.calls[0]["cmd"][:2] == ["opencode", "run"] and out["harness"] == "opencode"
+    assert opencode.CONFIG_PATH in written
+    out, procs, _ = _harness_run(world, "mini_swe_agent")
+    assert procs.calls[0]["cmd"][0] == mini_swe_agent.MINI_BIN
+    assert out["metrics"]["tool_calls"] == 1  # read from the trajectory after the kill
+
+
+def test_a_harness_not_in_this_image_is_refused(world):
+    with pytest.raises(rollout.HarnessUnavailable):
+        _harness_run(world, "opencode", params={"harnesses": ["claude_code"]})
+
+
+# ---------------- S20: image build ----------------
+
+
+def test_install_commands_follow_the_selected_harnesses():
+    only_cc = install.commands(["claude_code"])
+    assert any("@anthropic-ai/claude-code@" in " ".join(c) for c in only_cc)
+    assert not any("opencode-ai" in " ".join(c) or "mini-swe-agent" in " ".join(c) for c in only_cc)
+    all3 = " | ".join(
+        " ".join(c) for c in install.commands(["claude_code", "opencode", "mini_swe_agent"])
+    )
+    assert f"opencode-ai@{install.VERSIONS['opencode']}" in all3
+    assert f"mini-swe-agent=={install.VERSIONS['mini_swe_agent']}" in all3
+    assert "/opt/mini" in all3  # its own venv, away from the Task environment
+    with pytest.raises(ValueError):
+        install.commands(["codex"])

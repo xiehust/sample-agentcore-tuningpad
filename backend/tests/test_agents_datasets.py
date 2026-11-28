@@ -50,6 +50,16 @@ def test_template_context_contains_config_and_toolkit_files(toolkit_repo, stub_t
     assert checks["errors"] == [] and checks["warnings"] == []
 
 
+def test_harnesses_is_a_multiselect_of_installed_choices():
+    assert resolve_params("multi_harness", None)["harnesses"] == ["claude_code"]
+    picked = resolve_params("multi_harness", {"harnesses": ["opencode", "claude_code"]})
+    assert picked["harnesses"] == ["claude_code", "opencode"]  # in the template's order
+    for bad in ([], ["codex"], "claude_code", [1]):
+        with pytest.raises(AppError) as e:
+            resolve_params("multi_harness", {"harnesses": bad})
+        assert e.value.code == "template.invalid_param"
+
+
 def test_multi_harness_context_passes_the_contract_checks(toolkit_repo, stub_toolkit_build):
     agent = {"id": "ag-mh", "source": "template", "template_id": "multi_harness", "config": {}}
     ctx = svc.prepare_context(agent)
@@ -60,6 +70,7 @@ def test_multi_harness_context_passes_the_contract_checks(toolkit_repo, stub_too
         "tool_call_budget": 40.0,
         "harness_max_turns": 200.0,
         "smoke_bedrock_model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "harnesses": ["claude_code"],
     }
     assert svc.static_checks(ctx) == {"errors": [], "warnings": []}
 
@@ -336,6 +347,22 @@ def test_smoke_payloads_precedence():
     assert pa.smoke_payloads(agent, [{"prompt": "x"}]) == [{"prompt": "x"}]
     custom = {"source": "upload", "template_id": None, "config": {"smoke_payloads": [{"a": 1}]}}
     assert pa.smoke_payloads(custom, None) == [{"a": 1}]
+
+
+def test_smoke_covers_every_installed_harness():
+    rows = [{"task_id": "a"}, {"task_id": "b"}]
+    agent = {
+        "source": "template",
+        "template_id": "multi_harness",
+        "config": {"params": {"harnesses": ["claude_code", "opencode", "mini_swe_agent"]}},
+    }
+    got = pa.smoke_payloads(agent, rows)
+    assert [p["harness"] for p in got] == ["claude_code", "opencode", "mini_swe_agent"]
+    assert [p["task_id"] for p in got] == ["a", "b", "a"]
+    # a payload that already names its harness is kept as given
+    assert pa.smoke_payloads(agent, [{"task_id": "a", "harness": "opencode"}]) == [
+        {"task_id": "a", "harness": "opencode"}
+    ]
 
 
 def test_data_driven_smoke_uses_the_runtimes_region():

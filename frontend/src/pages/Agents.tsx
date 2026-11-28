@@ -76,6 +76,23 @@ function AgentList() {
   );
 }
 
+function MultiCheck({ options, value, onChange }: { options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="tp-row">
+      {options.map((o) => (
+        <label key={o} className="tp-row">
+          <input
+            type="checkbox"
+            checked={value.includes(o)}
+            onChange={(e) => onChange(e.target.checked ? options.filter((x) => x === o || value.includes(x)) : value.filter((x) => x !== o))}
+          />
+          <span className="tp-mono">{o}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function ParamFields({ tpl, values, onChange }: { tpl: Template; values: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
   const loc = useLocalized();
   if (!tpl.params.length) return null;
@@ -87,6 +104,8 @@ function ParamFields({ tpl, values, onChange }: { tpl: Template; values: Record<
             <textarea className="v2-textarea" rows={4} value={String(values[p.key] ?? p.default)} onChange={(e) => onChange({ ...values, [p.key]: e.target.value })} />
           ) : p.type === "select" ? (
             <Select value={String(values[p.key] ?? p.default)} options={(p.options ?? []).map((o) => ({ value: o, label: o }))} onChange={(v) => onChange({ ...values, [p.key]: v })} />
+          ) : p.type === "multiselect" ? (
+            <MultiCheck options={p.options ?? []} value={(values[p.key] ?? p.default) as string[]} onChange={(v) => onChange({ ...values, [p.key]: v })} />
           ) : (
             <input className="v2-input" type="number" min={p.min} max={p.max} step="any" value={String(values[p.key] ?? p.default)} onChange={(e) => onChange({ ...values, [p.key]: Number(e.target.value) })} />
           )}

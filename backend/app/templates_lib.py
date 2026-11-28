@@ -49,6 +49,13 @@ def resolve_params(template_id: str, given: dict[str, Any] | None) -> dict[str, 
         v = given.get(p["key"], p.get("default"))
         if p["type"] == "select" and v not in p["options"]:
             raise AppError("template.invalid_param", f"{p['key']} must be one of {p['options']}")
+        if p["type"] == "multiselect":
+            if not isinstance(v, list) or not v or not set(v) <= set(p["options"]):
+                raise AppError(
+                    "template.invalid_param",
+                    f"{p['key']} must be a non-empty subset of {p['options']}",
+                )
+            v = [o for o in p["options"] if o in v]
         if p["type"] == "number":
             v = float(v)
             if ("min" in p and v < p["min"]) or ("max" in p and v > p["max"]):

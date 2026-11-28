@@ -25,10 +25,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import claude_code, reward
+from . import claude_code, mini_swe_agent, opencode, reward
 from .procenv import base_env
 
-HARNESSES = {claude_code.NAME: claude_code}
+HARNESSES = {h.NAME: h for h in (claude_code, opencode, mini_swe_agent)}
 HARNESS_USER = "harness"
 DEFAULT_HARNESS_TIMEOUT_S = 1200.0
 # TuningPad's smoke waits 600s per rollout; leave room for staging and the Verifier
@@ -101,6 +101,20 @@ def run_process(
         return Completed(None, out, err)
 
 
+def write_root_file(path: Path, content: str) -> None:
+    """A Harness config: written by root, readable (not writable) by the Harness user."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    path.chmod(0o644)
+
+
+def read_text_or_empty(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
 def kill_user_processes(user: str) -> None:
     """Whatever the Harness left behind (detached or not) must not outlive it."""
     subprocess.run(["pkill", "-KILL", "-u", user], check=False)
@@ -162,6 +176,8 @@ def run_rollout(
     run: Run,
     kill_user: Callable[[str], None],
     region: str,
+    write_file: Callable[[Path, str], None] = write_root_file,
+    read_output: Callable[[Path], str] = read_text_or_empty,
 ) -> dict[str, Any]:
     config = payload["_config"]
     harness = _pick_harness(payload, params.get("harnesses") or [claude_code.NAME])
@@ -180,6 +196,8 @@ def run_rollout(
         max_turns=int(params["harness_max_turns"]),
         smoke_model=params["smoke_bedrock_model"],
     )
+    for path, content in launch.files.items():
+        write_file(path, content)
     agent_timeout = (task.get("agent") or {}).get("timeout_sec") or DEFAULT_HARNESS_TIMEOUT_S
     cap = SMOKE_HARNESS_TIMEOUT_S if smoke else DEFAULT_HARNESS_TIMEOUT_S
     done = run(
@@ -191,7 +209,8 @@ def run_rollout(
         user=HARNESS_USER,
     )
     kill_user(HARNESS_USER)
-    parsed = harness.parse(done.stdout)
+    report = read_output(launch.output_file) if launch.output_file else done.stdout
+    parsed = harness.parse(report)
     answer = paths.workdir / "answer.txt"
     answered = answer.is_file() and not answer.is_symlink() and answer.stat().st_size > 0
 

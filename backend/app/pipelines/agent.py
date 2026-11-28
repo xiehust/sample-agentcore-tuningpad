@@ -152,6 +152,18 @@ register("agent.import", [Stage("inspect", stage_import)], on_finish=_built)
 def smoke_payloads(
     agent: dict[str, Any], override: list[dict] | None, region: str | None = None
 ) -> list[dict]:
+    """Smoke payloads; for an Agent with several Harnesses (a `harnesses` template param),
+    one payload per installed Harness so each is shown to run."""
+    payloads = _base_smoke_payloads(agent, override, region)
+    harnesses = (agent["config"].get("params") or {}).get("harnesses")
+    if not harnesses or not payloads or any("harness" in p for p in payloads):
+        return payloads
+    return [{**payloads[i % len(payloads)], "harness": h} for i, h in enumerate(harnesses)]
+
+
+def _base_smoke_payloads(
+    agent: dict[str, Any], override: list[dict] | None, region: str | None
+) -> list[dict]:
     if override:
         return override
     if agent["config"].get("smoke_payloads"):

@@ -151,7 +151,8 @@
     "dataset.harbor_invalid_task": "A Task is not in the expected Harbor format or its input files are missing.",
     "dataset.no_estimate": "This built-in dataset has no size estimate.",
     "agent.overlay_link": "The template's agent overlay contains a link. Template overlays must contain only regular files and directories.",
-    "run.bad_history_mode": "History mode must be linear or tree."
+    "run.bad_history_mode": "History mode must be linear or tree.",
+    "template.invalid_param": "A template parameter has an invalid value."
   },
   "common": {
     "apply": "Apply",

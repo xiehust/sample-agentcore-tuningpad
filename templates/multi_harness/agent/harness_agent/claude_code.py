@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 
+from .launch import Launch, Parsed
 from .procenv import base_env
 
 NAME = "claude_code"
@@ -34,19 +34,6 @@ _QUIET = {
 }
 # Substrings of Claude Code's error result when the smoke model cannot be used
 _ACCESS_ERRORS = ("access", "denied", "not authorized", "model identifier", "not available")
-
-
-@dataclass(frozen=True)
-class Launch:
-    cmd: list[str]
-    env: dict[str, str]
-    stdin: str
-
-
-@dataclass(frozen=True)
-class Parsed:
-    tool_calls: int
-    warning: str | None
 
 
 def build(prompt: str, config: dict, *, region: str, max_turns: int, smoke_model: str) -> Launch:
