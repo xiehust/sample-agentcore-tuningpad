@@ -289,12 +289,14 @@ def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-sample states (`evals.sample_state`, shared with the sample list so
     the counts always agree). Truncation is scored 0; both failure kinds count as 0 in the
     overall mean."""
-    from .evals import reward_of, sample_state
+    from .evals import by_harness, reward_of, sample_state
 
-    rewards, failed, truncated = [], 0, 0
+    rewards, failed, truncated, unscored = [], 0, 0, 0
     for it in items:
         state = sample_state(it)
-        if state == "truncated":
+        if state == "unscored":
+            unscored += 1  # no Verifier result: left out of both means
+        elif state == "truncated":
             truncated += 1
             rewards.append(0.0)
         elif state == "scored":
@@ -302,12 +304,18 @@ def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             failed += 1
     n = len(items)
-    return {
+    graded = n - unscored
+    out = {
         "n": n,
         "scored": len(rewards),
         "failed": failed,
         "truncated": truncated,
-        "mean_reward": round(sum(rewards) / n, 4) if n else None,  # failures count as 0
+        "unscored": unscored,
+        # failures count as 0
+        "mean_reward": round(sum(rewards) / graded, 4) if graded else None,
         "mean_reward_scored": round(sum(rewards) / len(rewards), 4) if rewards else None,
         "acr_failed_rate": round(failed / n, 4) if n else None,
     }
+    if per := by_harness(items):
+        out["by_harness"] = per
+    return out

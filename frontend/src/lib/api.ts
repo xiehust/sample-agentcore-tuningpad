@@ -764,6 +764,27 @@ export interface EndpointView {
   job: Job | null;
 }
 
+/** One Harness's cells in an eval: pass@1 excludes unscored cells, failed ones count as unsolved. */
+export interface HarnessEvalSummary {
+  n: number;
+  scored: number;
+  unscored: number;
+  failed: number;
+  solved: number;
+  pass_at_1: number | null;
+  mean_tool_calls: number | null;
+}
+
+/** This eval next to another of the same Tasks; tool calls only on Tasks both solved. */
+export interface HarnessComparison {
+  pass_at_1: number | null;
+  other_pass_at_1: number | null;
+  both_solved: number;
+  mean_tool_calls: number | null;
+  other_mean_tool_calls: number | null;
+  tool_call_change: number | null;
+}
+
 export interface EvalView {
   id: string;
   name: string;
@@ -773,7 +794,8 @@ export interface EvalView {
   split: string;
   limit: number;
   status: string;
-  summary: { n?: number; scored?: number; failed?: number; truncated?: number; mean_reward?: number | null; mean_reward_scored?: number | null; acr_failed_rate?: number | null };
+  summary: { n?: number; scored?: number; failed?: number; truncated?: number; unscored?: number; mean_reward?: number | null; mean_reward_scored?: number | null; acr_failed_rate?: number | null; by_harness?: Record<string, HarnessEvalSummary> };
+  harnesses?: string[] | null;
   results_s3: string | null;
   /** The eval ran on the eval-only OTEL runtime and recorded AgentCore traces. */
   observe?: boolean | null;
@@ -793,14 +815,17 @@ export interface CreateEvalBody {
   sampling_params?: Record<string, number>;
   /** record AgentCore traces (waterfall) on the eval-only OTEL twin of the runtime */
   observe?: boolean;
+  harnesses?: string[] | null;
 }
 
 /** Per-sample outcome: `scored` has a reward; a 500 from the agent is `acr_failed`, not scored. */
-export type EvalSampleState = "scored" | "truncated" | "acr_failed" | "invoke_failed";
+export type EvalSampleState = "scored" | "truncated" | "acr_failed" | "invoke_failed" | "unscored";
 export type EvalSampleFilter = "all" | "failed" | "truncated";
 
 export interface EvalSampleRow {
   index: number;
+  task_index: number;
+  harness: string | null;
   state: EvalSampleState;
   reward: number | null;
   status_code: number | null;
@@ -898,6 +923,8 @@ export const servingApi = {
   createEval: (body: CreateEvalBody) => post<{ id: string; job_id: string }>("/api/evals", body),
   evalSamples: (id: string, opts: { status?: EvalSampleFilter; offset?: number; limit?: number } = {}) =>
     get<EvalSamples>(`/api/evals/${encodeURIComponent(id)}/samples?${q(opts)}`),
+  compareEvals: (id: string, otherId: string) =>
+    get<{ eval_id: string; other_id: string; by_harness: Record<string, HarnessComparison> }>(`/api/evals/${id}/compare/${otherId}`),
   evalSample: (id: string, index: number) =>
     get<EvalSampleDetail>(`/api/evals/${encodeURIComponent(id)}/samples/${index}`),
   /** `force` skips the backend's 60 s trace cache. */

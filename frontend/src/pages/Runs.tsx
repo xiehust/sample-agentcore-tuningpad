@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { CheckGroup } from "../components/CheckGroup";
 import { JobPanel } from "../components/JobPanel";
 import { LineChart } from "../components/LineChart";
 import { StatusTag } from "../components/StatusTag";
@@ -274,18 +275,7 @@ function RunWizard() {
             </div>
             {installedHarnesses.length > 0 && (
               <Field label={t("runs.harnesses")} hint={t("runs.harnessesHint")} full>
-                <div className="tp-row">
-                  {installedHarnesses.map((h) => (
-                    <label key={h} className="tp-row">
-                      <input
-                        type="checkbox"
-                        checked={pickedHarnesses.includes(h)}
-                        onChange={(e) => setHarnesses(e.target.checked ? installedHarnesses.filter((x) => x === h || pickedHarnesses.includes(x)) : pickedHarnesses.filter((x) => x !== h))}
-                      />
-                      <span className="tp-mono">{h}</span>
-                    </label>
-                  ))}
-                </div>
+                <CheckGroup options={installedHarnesses} value={pickedHarnesses} onChange={setHarnesses} />
               </Field>
             )}
             {runtimes.length === 0 && !agents.loading && <Alert tone="warn">{t("runs.noRuntime")}</Alert>}

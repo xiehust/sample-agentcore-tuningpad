@@ -237,7 +237,13 @@ def eval_env(tmp_path):
 def test_samples_api_lists_filters_and_pages(client, eval_env):
     d = client.get("/api/evals/ev-1/samples").json()
     assert d["total"] == 5 and d["observe"] is False
-    assert d["counts"] == {"scored": 2, "truncated": 1, "acr_failed": 1, "invoke_failed": 1}
+    assert d["counts"] == {
+        "scored": 2,
+        "truncated": 1,
+        "acr_failed": 1,
+        "invoke_failed": 1,
+        "unscored": 0,
+    }
     first = d["samples"][0]
     assert (first["turns"], first["tool_calls"], first["session_id"]) == (2, 2, SID)
     failed = client.get("/api/evals/ev-1/samples?status=failed").json()
@@ -262,3 +268,174 @@ def test_sample_detail_is_redacted_and_complete(client, eval_env):
         bad["state"] == "acr_failed" and bad["messages"] == [] and "IndexError" in bad["traceback"]
     )
     assert client.get("/api/evals/ev-1/samples/9").json()["code"] == "eval.sample_not_found"
+
+
+# ---------------- per-Harness evaluation matrix (#11) ----------------
+
+H = ["claude_code", "opencode"]
+
+
+def _cell(i, task, harness, reward, tool_calls, stop="completed"):
+    return {
+        "index": i,
+        "task_index": task,
+        "harness": harness,
+        "success": True,
+        "result": {
+            "reward": reward,
+            "stop_reason": stop,
+            "metrics": {"tool_calls": tool_calls, "correct": int(bool(reward and reward >= 1))},
+        },
+    }
+
+
+def test_cells_expand_tasks_by_harness():
+    payloads = [{"task_id": "a"}, {"task_id": "b", "harness": "mini_swe_agent"}]
+    cells = esvc.eval_cells(payloads, H)
+    assert [(c["task_index"], c["payload"]["harness"]) for c in cells] == [
+        (0, "claude_code"),
+        (0, "opencode"),
+        (1, "claude_code"),  # the eval's Harnesses win over a dataset's own column
+        (1, "opencode"),
+    ]
+    plain = esvc.eval_cells(payloads[:1], None)
+    assert plain == [{"task_index": 0, "harness": None, "payload": {"task_id": "a"}}]
+
+
+def test_a_cell_without_a_verifier_result_is_unscored_not_wrong():
+    item = _cell(0, 0, "opencode", None, 3, stop="verifier_no_result")
+    assert esvc.sample_state(item) == "unscored"
+    s = svc.summarize_eval([item, _cell(1, 1, "opencode", 1.05, 2)])
+    assert (s["unscored"], s["scored"], s["mean_reward_scored"]) == (1, 1, 1.05)
+
+
+def test_summary_reports_pass_at_1_and_tool_calls_per_harness():
+    items = [
+        _cell(0, 0, "claude_code", 1.09, 4),
+        _cell(1, 0, "opencode", 0.0, 9),
+        _cell(2, 1, "claude_code", 0.0, 6),
+        _cell(3, 1, "opencode", None, 2, stop="verifier_no_result"),
+        {"index": 4, "task_index": 2, "harness": "opencode", "success": False, "error": "x"},
+    ]
+    by = svc.summarize_eval(items)["by_harness"]
+    assert by["claude_code"] == {
+        "n": 2,
+        "scored": 2,
+        "unscored": 0,
+        "failed": 0,
+        "solved": 1,
+        "pass_at_1": 0.5,
+        "mean_tool_calls": 5.0,
+    }
+    # unscored cells leave the denominator; failed ones count as unsolved
+    assert by["opencode"]["pass_at_1"] == 0.0 and by["opencode"]["n"] == 3
+    assert by["opencode"]["unscored"] == 1 and by["opencode"]["failed"] == 1
+
+
+def test_a_single_harness_summary_matches_the_plain_eval():
+    plain = [dict(_cell(i, i, None, r, 2), harness=None) for i, r in enumerate([1.0, 0.0, 1.0])]
+    one = [_cell(i, i, "claude_code", r, 2) for i, r in enumerate([1.0, 0.0, 1.0])]
+    a, b = svc.summarize_eval(plain), svc.summarize_eval(one)
+    assert {k: v for k, v in b.items() if k != "by_harness"} == a
+    assert "by_harness" not in a
+
+
+def test_compare_two_evals_per_harness():
+    base = [
+        _cell(0, 0, "claude_code", 1.0, 10),
+        _cell(1, 1, "claude_code", 0.0, 8),
+        _cell(2, 0, "opencode", 1.0, 6),
+    ]
+    trained = [
+        _cell(0, 0, "claude_code", 1.08, 5),
+        _cell(1, 1, "claude_code", 1.05, 7),
+        _cell(2, 0, "opencode", 0.0, 3),
+    ]
+    out = esvc.compare(trained, base)
+    cc = out["claude_code"]
+    assert (cc["pass_at_1"], cc["other_pass_at_1"]) == (1.0, 0.5)
+    # tool calls only on Tasks both solved: task 0 → 5 vs 10
+    assert (cc["both_solved"], cc["mean_tool_calls"], cc["other_mean_tool_calls"]) == (1, 5.0, 10.0)
+    assert cc["tool_call_change"] == -0.5
+    assert out["opencode"]["both_solved"] == 0 and out["opencode"]["tool_call_change"] is None
+
+
+def test_sample_rows_show_the_harness_and_input_comes_from_the_task(client, eval_env):
+    cells = [_cell(0, 3, "opencode", 1.0, 2)]
+    esvc.results_path("ev-1").write_text("\n".join(json.dumps(c) for c in cells))
+    row = client.get("/api/evals/ev-1/samples").json()["samples"][0]
+    assert (row["harness"], row["task_index"], row["tool_calls"]) == ("opencode", 3, 2)
+    assert client.get("/api/evals/ev-1/samples/0").json()["input"]["prompt"] == "delete Alice"
+
+
+def _harness_agent():
+    with session_scope() as s:
+        a = s.get(Agent, "ag-1")
+        a.template_id = "multi_harness"
+        a.config = {"params": {"harnesses": H}}
+        a.contract = "verl-v2"
+        s.get(AgentRuntime, "rt-1").contract = "verl-v2"
+
+
+def _eval_body(**extra):
+    return {
+        "name": "m",
+        "endpoint_id": "ep-1",
+        "agent_runtime_id": "rt-1",
+        "dataset_id": "ds-1",
+        "split": "val",
+        "limit": 5,
+        **extra,
+    }
+
+
+def test_an_eval_runs_every_installed_harness_by_default(client, eval_env, monkeypatch):
+    from app.jobs import engine as eng
+
+    monkeypatch.setattr(eng.get_engine()._pool, "submit", lambda *a, **k: None)
+    _harness_agent()
+    r = client.post("/api/evals", json=_eval_body())
+    assert r.status_code == 200, r.text
+    with session_scope() as s:
+        assert s.get(Eval, r.json()["id"]).harnesses == H
+    picked = client.post("/api/evals", json=_eval_body(harnesses=["opencode"])).json()
+    with session_scope() as s:
+        assert s.get(Eval, picked["id"]).harnesses == ["opencode"]
+    bad = client.post("/api/evals", json=_eval_body(harnesses=["codex"])).json()
+    assert bad["code"] == "harness.not_installed"
+
+
+def test_compare_endpoint_needs_the_same_tasks(client, eval_env):
+    cells = [_cell(0, 0, "opencode", 1.0, 2)]
+    esvc.results_path("ev-1").write_text(json.dumps(cells[0]))
+    with session_scope() as s:
+        s.add(
+            Eval(
+                id="ev-2",
+                name="b",
+                endpoint_id="ep-1",
+                agent_runtime_id="rt-1",
+                dataset_id="ds-1",
+                split="val",
+                limit=5,
+                status="succeeded",
+                summary={},
+            )
+        )
+        s.add(
+            Eval(
+                id="ev-3",
+                name="c",
+                endpoint_id="ep-1",
+                agent_runtime_id="rt-1",
+                dataset_id="ds-1",
+                split="test",
+                limit=5,
+                status="succeeded",
+                summary={},
+            )
+        )
+    esvc.results_path("ev-2").write_text(json.dumps(_cell(0, 0, "opencode", 1.0, 4)))
+    d = client.get("/api/evals/ev-1/compare/ev-2").json()
+    assert d["by_harness"]["opencode"]["tool_call_change"] == -0.5
+    assert client.get("/api/evals/ev-1/compare/ev-3").json()["code"] == "eval.not_comparable"

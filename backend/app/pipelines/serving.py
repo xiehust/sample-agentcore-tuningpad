@@ -233,19 +233,25 @@ def stage_eval(ctx: StageContext) -> None:
     c = pc.load(ep["cluster_id"])
     bucket = proj.require_region(c["region"])["bucket"]
     key = svc.read_api_key(c["region"], c["eks_name"], ep["id"])
-    payloads = _payloads(ev["dataset_id"], ev["split"], ev["limit"])
-    _save(Eval, ev["id"], status="running", started_at=utcnow(), ended_at=None)
+    from ..services import evals as esvc
     from ..services import rollouts
 
+    # one cell per Task, or per Task × Harness; `limit` counts Tasks
+    cells = esvc.eval_cells(_payloads(ev["dataset_id"], ev["split"], ev["limit"]), ev["harnesses"])
+    if ev["harnesses"]:
+        ctx.log(
+            f"{len(cells)} cells: {len(cells) // len(ev['harnesses'])} tasks × {ev['harnesses']}"
+        )
+    _save(Eval, ev["id"], status="running", started_at=utcnow(), ended_at=None)
     tasks = [
         rollouts.with_config(
-            p,
+            c["payload"],
             base_url=ep["url"],
             model_id=ep["served_model_name"],
             api_key=key,
             sampling_params=sampling,
         )
-        for p in payloads
+        for c in cells
     ]
     items: list[dict[str, Any]] = []
     out_path = Path(dsvc.local_dir(ev["id"])) / "results.jsonl"
@@ -253,12 +259,14 @@ def stage_eval(ctx: StageContext) -> None:
 
         def on_result(rec: dict[str, Any]) -> None:
             ctx.check_cancel()
+            cell = cells[rec["index"]]
+            rec |= {"task_index": cell["task_index"], "harness": cell["harness"]}
             items.append(rec)
             f.write(json.dumps(rec, default=str) + "\n")
             f.flush()
             if len(items) % 10 == 0:
                 summ = svc.summarize_eval(items)
-                ctx.detail(f"{len(items)}/{len(payloads)} · mean {summ['mean_reward']}")
+                ctx.detail(f"{len(items)}/{len(cells)} · mean {summ['mean_reward']}")
                 _save(Eval, ev["id"], summary=summ)
 
         rollouts.run_batch(

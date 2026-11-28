@@ -10,6 +10,7 @@ const SAMPLE_STATE_TONE: Record<EvalSampleState, TagTone> = {
   truncated: "orange",
   acr_failed: "red",
   invoke_failed: "red",
+  unscored: "gray",
 };
 
 /** Localized state chip of one eval sample. */

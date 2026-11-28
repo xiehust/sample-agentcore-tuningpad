@@ -145,19 +145,25 @@ class EvalBody(BaseModel):
     sampling_params: dict[str, float | int] | None = None
     # record AgentCore traces (waterfall): runs on the eval-only OTEL twin of the runtime
     observe: bool = False
+    # Harnesses to run every Task under (default: all the Agent has); None for others
+    harnesses: list[str] | None = None
 
 
 @evals.post("")
 def create_eval(body: EvalBody):
-    from ..models import AgentRuntime
+    from ..models import Agent, AgentRuntime
     from ..services import agents as agents_svc
+    from ..services import harness_assign
 
     with session_scope() as s:
         rt = s.get(AgentRuntime, body.agent_runtime_id)
         if not rt:
             raise NotFound("runtime.not_found", "agent runtime not found")
         region, contract = rt.region, rt.contract
+        agent = s.get(Agent, rt.agent_id)
+        installed = harness_assign.installed(agent.config if agent else None)
     agents_svc.require_contract(contract)
+    harnesses = harness_assign.choose(installed, body.harnesses)
     if body.observe:
         from ..services import observability as obs
 
@@ -183,10 +189,18 @@ def create_eval(body: EvalBody):
                 status="queued",
                 summary={},
                 observe=body.observe,
+                harnesses=harnesses,
             )
         )
     payload = {"sampling_params": body.sampling_params} if body.sampling_params else {}
     return {"id": eid, "job_id": get_engine().start("eval.run", eid, payload)}
+
+
+@evals.get("/{eval_id}/compare/{other_id}")
+def compare_evals(eval_id: str, other_id: str):
+    """Per Harness: this eval's pass@1 and tool calls next to another eval of the same
+    Tasks (e.g. the base model)."""
+    return esvc.compare_evals(eval_id, other_id)
 
 
 @evals.get("/{eval_id}/samples")

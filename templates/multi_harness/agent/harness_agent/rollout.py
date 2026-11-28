@@ -243,11 +243,15 @@ def run_rollout(
     )
     if verifier_reward is None:
         stop_reason = "verifier_no_result"
-    elif smoke and not answered and not parsed.warning:
-        # smoke proves the Harness can write an answer; a 0 from an empty answer does not
+    elif smoke and not answered and not parsed.warning and parsed.tool_calls == 0:
+        # smoke proves the wiring: a Harness that never acted did not reach the model
         score, stop_reason = None, "harness_no_answer"
     else:
         stop_reason = "harness_timeout" if done.returncode is None else "completed"
+    warning = parsed.warning
+    if smoke and not answered and not warning and parsed.tool_calls:
+        # the Harness ran tools but the (weak) smoke model wrote no answer: show, not fail
+        warning = f"no answer written after {parsed.tool_calls} tool calls"
     out: dict[str, Any] = {
         "reward": score,
         "harness": harness.NAME,
@@ -259,6 +263,6 @@ def run_rollout(
         },
         "stop_reason": stop_reason,
     }
-    if parsed.warning:
-        out["warning"] = parsed.warning
+    if warning:
+        out["warning"] = warning
     return out

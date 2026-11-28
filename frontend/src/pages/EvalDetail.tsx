@@ -5,11 +5,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { StatusTag } from "../components/StatusTag";
 import { TraceWaterfall } from "../components/TraceWaterfall";
 import { SampleStateTag, Transcript } from "../components/Transcript";
-import { servingApi, type EvalSampleFilter, type EvalSampleRow } from "../lib/api";
+import { servingApi, type EvalSampleFilter, type EvalSampleRow, type EvalView } from "../lib/api";
 import { num } from "../lib/format";
 import { DETAIL_POLL_MS, usePoll } from "../lib/poll";
 import { useLoad } from "../v2/hooks";
-import { Alert, Button, Card, Descriptions, Drawer, FlowHeader, Kpi, Pager, Segmented, Spin, SubTabs, Table, Tag } from "../v2/ui";
+import { Alert, Button, Card, Descriptions, Drawer, FlowHeader, Kpi, Pager, Segmented, Select, Spin, SubTabs, Table, Tag } from "../v2/ui";
 
 const PAGE = 20;
 // "preparing": the eval-only OTEL runtime is being deployed before the rollouts start
@@ -63,6 +63,41 @@ function SampleView({ evalId, index, observe }: { evalId: string; index: number;
   );
 }
 
+/** This eval next to another of the same dataset split (e.g. the base model), per Harness. */
+function CompareCard({ ev, evals }: { ev: EvalView; evals: EvalView[] }) {
+  const { t } = useTranslation();
+  const others = evals.filter((e) => e.id !== ev.id && e.dataset_id === ev.dataset_id && e.split === ev.split && e.status === "succeeded");
+  const [otherId, setOtherId] = useState("");
+  const cmp = useLoad(() => (otherId ? servingApi.compareEvals(ev.id, otherId) : Promise.resolve(null)), `${ev.id}-${otherId}`);
+  const pct = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(0)}%`);
+  return (
+    <Card
+      title={t("evals.compare.title")}
+      sub={t("evals.compare.sub")}
+      end={<Select value={otherId} onChange={setOtherId} placeholder={t("evals.compare.pick")} options={others.map((e) => ({ value: e.id, label: e.name }))} />}
+      flush
+    >
+      {otherId && cmp.data ? (
+        <Table
+          testId="tp-eval-compare"
+          rowKey={(r) => r.h}
+          rows={Object.entries(cmp.data.by_harness).map(([h, x]) => ({ h, ...x }))}
+          columns={[
+            { key: "h", title: t("runs.harnesses"), render: (r) => <span className="tp-mono">{r.h || "—"}</span> },
+            { key: "p", title: t("evals.compare.passThis"), render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
+            { key: "o", title: t("evals.compare.passOther"), render: (r) => num(r.other_pass_at_1, 3) },
+            { key: "b", title: t("evals.compare.bothSolved"), render: (r) => r.both_solved },
+            { key: "tc", title: t("evals.compare.toolCalls"), render: (r) => `${num(r.mean_tool_calls, 1)} / ${num(r.other_mean_tool_calls, 1)}` },
+            { key: "d", title: t("evals.compare.change"), render: (r) => pct(r.tool_call_change) },
+          ]}
+        />
+      ) : (
+        <div className="v2-muted" style={{ padding: "12px 24px" }}>{others.length ? t("evals.compare.hint") : t("evals.compare.none")}</div>
+      )}
+    </Card>
+  );
+}
+
 /** Eval detail: KPIs from the per-sample states, filterable sample table, transcript drawer. */
 export default function EvalDetail({ id }: { id: string }) {
   const { t } = useTranslation();
@@ -92,7 +127,9 @@ export default function EvalDetail({ id }: { id: string }) {
     );
   }
   const c = samples.data?.counts;
-  const all = c ? c.scored + c.truncated + c.acr_failed + c.invoke_failed : null;
+  const all = c ? c.scored + c.truncated + c.acr_failed + c.invoke_failed + (c.unscored ?? 0) : null;
+  const byHarness = ev?.summary.by_harness;
+  const showHarness = (samples.data?.samples ?? []).some((r) => r.harness);
   const failed = c ? c.acr_failed + c.invoke_failed : null;
   const pages = Math.max(1, Math.ceil((samples.data?.total ?? 0) / PAGE));
   const label = (key: string, n: number | null) => (n === null ? t(key) : `${t(key)} (${n})`);
@@ -118,8 +155,27 @@ export default function EvalDetail({ id }: { id: string }) {
           <Kpi label={t("evals.state.truncated")} value={c ? c.truncated : "—"} />
           <Kpi label={t("evals.state.acr_failed")} value={c ? c.acr_failed : "—"} tone={c && c.acr_failed > 0 ? "bad" : undefined} />
           <Kpi label={t("evals.state.invoke_failed")} value={c ? c.invoke_failed : "—"} tone={c && c.invoke_failed > 0 ? "bad" : undefined} />
+          {!!c?.unscored && <Kpi label={t("evals.state.unscored")} value={c.unscored} />}
           <Kpi label={t("evals.detail.samples")} value={all ?? "—"} sub={ev ? `${ev.split} · ${t("evals.limit")} ${ev.limit}` : undefined} />
         </div>
+        {byHarness && (
+          <Card title={t("evals.matrix.title")} sub={t("evals.matrix.sub")} flush>
+            <Table
+              testId="tp-eval-harnesses"
+              rowKey={(r) => r.h}
+              rows={Object.entries(byHarness).map(([h, s]) => ({ h, ...s }))}
+              columns={[
+                { key: "h", title: t("runs.harnesses"), render: (r) => <span className="tp-mono">{r.h}</span> },
+                { key: "p", title: "pass@1", render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
+                { key: "s", title: t("evals.matrix.solved"), render: (r) => `${r.solved}/${r.n - r.unscored}` },
+                { key: "tc", title: t("evals.matrix.meanToolCalls"), render: (r) => num(r.mean_tool_calls, 1) },
+                { key: "u", title: t("evals.state.unscored"), render: (r) => r.unscored },
+                { key: "f", title: t("evals.failed"), render: (r) => r.failed },
+              ]}
+            />
+          </Card>
+        )}
+        {byHarness && ev && <CompareCard ev={ev} evals={evals.data ?? []} />}
         <Card
           title={t("evals.detail.samples")}
           end={
@@ -147,6 +203,7 @@ export default function EvalDetail({ id }: { id: string }) {
             empty={filter === "all" ? t("evals.detail.noSamples") : t("evals.detail.noMatch")}
             columns={[
               { key: "i", title: "#", width: 64, render: (r) => <button type="button" className="v2-link" onClick={() => openSample(r.index)}>{r.index}</button> },
+              ...(showHarness ? [{ key: "h", title: t("runs.harnesses"), render: (r: EvalSampleRow) => <span className="tp-mono">{r.harness}</span> }] : []),
               { key: "s", title: t("common.status"), render: (r) => <SampleStateTag state={r.state} /> },
               { key: "r", title: t("evals.detail.reward"), render: (r) => <b>{num(r.reward, 3)}</b> },
               {

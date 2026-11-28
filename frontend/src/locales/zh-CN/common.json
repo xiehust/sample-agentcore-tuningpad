@@ -153,8 +153,9 @@
     "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。",
     "run.bad_history_mode": "History 模式只能是 linear 或 tree。",
     "template.invalid_param": "模板参数的取值无效。",
-    "run.harness_not_installed": "至少选一个 Harness，且只能选这个 Agent 镜像里有的。",
-    "run.dataset_harness_invalid": "数据集指定了本次 run 没有选用的 Harness。"
+    "run.dataset_harness_invalid": "数据集指定了本次 run 没有选用的 Harness。",
+    "harness.not_installed": "至少选一个 Harness，且只能选这个 Agent 镜像里有的。",
+    "eval.not_comparable": "只能比较同一数据集 split 上的评测。"
   },
   "common": {
     "apply": "应用",
@@ -760,7 +761,18 @@
   "evals": {
     "create": "新建评估",
     "how": "评估会在 AgentCore 上让 Agent 调用已部署的模型（基座或训练后）并对奖励取平均；失败的 rollout 记 0 分。",
-    "compare": "结果",
+    "compare": {
+      "title": "对比",
+      "sub": "与同一数据集 split 上的另一个评测对比，例如 base 模型。工具调用只统计两边都解出的 Task。",
+      "pick": "选择评测",
+      "passThis": "pass@1（本次）",
+      "passOther": "pass@1（对方）",
+      "bothSolved": "两边都解出",
+      "toolCalls": "工具调用（本次 / 对方）",
+      "change": "工具调用变化",
+      "hint": "选择一个评测进行对比。",
+      "none": "这个数据集 split 上没有其他已完成的评测。"
+    },
     "empty": "还没有评估。",
     "data": "数据集",
     "meanReward": "平均奖励",
@@ -774,7 +786,8 @@
       "scored": "已打分",
       "truncated": "截断",
       "acr_failed": "ACR 失败",
-      "invoke_failed": "调用失败"
+      "invoke_failed": "调用失败",
+      "unscored": "未打分"
     },
     "detail": {
       "open": "详情",
@@ -877,6 +890,13 @@
       "errors": "错误",
       "inputTokens": "输入 token",
       "outputTokens": "输出 token"
+    },
+    "harnessesHint": "每个 Task 在每个选中的 Harness 下各跑一次；数量上限按 Task 计",
+    "matrix": {
+      "title": "按 Harness",
+      "sub": "pass@1 不计 Verifier 没有结果的单元格；失败的单元格算未解出",
+      "solved": "解出",
+      "meanToolCalls": "工具调用（均值，已打分）"
     }
   },
   "overview": {

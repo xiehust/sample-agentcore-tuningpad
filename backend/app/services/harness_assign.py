@@ -33,12 +33,12 @@ def choose(installed: list[str] | None, requested: list[str] | None) -> list[str
     in the image's order. None for an Agent without Harnesses."""
     if not installed:
         if requested:
-            raise AppError("run.harness_not_installed", "this agent has no harnesses to pick")
+            raise AppError("harness.not_installed", "this agent has no harnesses to pick")
         return None
     picked = installed if requested is None else requested
     if not picked or not set(picked) <= set(installed):
         raise AppError(
-            "run.harness_not_installed",
+            "harness.not_installed",
             f"harnesses must be a non-empty subset of the agent's {installed}",
             detail={"installed": installed, "requested": requested},
         )

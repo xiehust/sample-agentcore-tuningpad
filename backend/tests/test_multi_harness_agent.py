@@ -391,9 +391,16 @@ def test_what_the_harness_writes_into_the_verifier_dirs_is_discarded(world):
     assert out["reward"] is None  # the planted reward.txt was cleared before grading
 
 
-def test_smoke_without_an_answer_fails_unless_the_model_was_unavailable(world):
+def test_smoke_without_an_answer_fails_only_if_the_harness_never_acted(world):
+    """Smoke checks the wiring: a weak smoke model that acted but wrote no answer is a
+    warning; a Harness that made no tool call at all fails (unless the model was unavailable)."""
     smoke = {**world["payload"], "_config": {**GATEWAY, "smoke": True}}
-    out = _run(world, FakeProcesses(world["paths"], answer=False, verifier_reward="0.0"), smoke)
+    acted = _run(world, FakeProcesses(world["paths"], answer=False, verifier_reward="0.0"), smoke)
+    assert acted["reward"] == 0.0 and "no answer" in acted["warning"]
+
+    idle = _stream({"type": "result"})
+    procs = FakeProcesses(world["paths"], answer=False, verifier_reward="0.0", stream=idle)
+    out = _run(world, procs, smoke)
     assert out["reward"] is None and out["stop_reason"] == "harness_no_answer"
 
     denied = _stream({"type": "result", "is_error": True, "result": "403 AccessDeniedException"})

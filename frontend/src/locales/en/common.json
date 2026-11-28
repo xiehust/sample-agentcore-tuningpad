@@ -153,8 +153,9 @@
     "agent.overlay_link": "The template's agent overlay contains a link. Template overlays must contain only regular files and directories.",
     "run.bad_history_mode": "History mode must be linear or tree.",
     "template.invalid_param": "A template parameter has an invalid value.",
-    "run.harness_not_installed": "Pick at least one harness, and only harnesses this agent's image contains.",
-    "run.dataset_harness_invalid": "The dataset assigns harnesses this run does not use."
+    "run.dataset_harness_invalid": "The dataset assigns harnesses this run does not use.",
+    "harness.not_installed": "Pick at least one harness, and only harnesses this agent's image contains.",
+    "eval.not_comparable": "Only evaluations of the same dataset split can be compared."
   },
   "common": {
     "apply": "Apply",
@@ -760,7 +761,18 @@
   "evals": {
     "create": "New evaluation",
     "how": "Evaluations run your agent on AgentCore against a served model (base or trained) and average the rewards; failed rollouts count as 0.",
-    "compare": "Results",
+    "compare": {
+      "title": "Compare",
+      "sub": "Against another eval of the same dataset split, e.g. the base model. Tool calls only on Tasks both solved.",
+      "pick": "Pick an eval",
+      "passThis": "pass@1 (this)",
+      "passOther": "pass@1 (other)",
+      "bothSolved": "Both solved",
+      "toolCalls": "Tool calls (this / other)",
+      "change": "Tool calls change",
+      "hint": "Pick an eval to compare with.",
+      "none": "No other finished eval of this dataset split."
+    },
     "empty": "No evaluations yet.",
     "data": "Dataset",
     "meanReward": "Mean reward",
@@ -774,7 +786,8 @@
       "scored": "Scored",
       "truncated": "Truncated",
       "acr_failed": "ACR failed",
-      "invoke_failed": "Invoke failed"
+      "invoke_failed": "Invoke failed",
+      "unscored": "Unscored"
     },
     "detail": {
       "open": "Details",
@@ -877,6 +890,13 @@
       "errors": "Errors",
       "inputTokens": "Input tokens",
       "outputTokens": "Output tokens"
+    },
+    "harnessesHint": "Every Task runs once under each picked harness; the limit counts Tasks",
+    "matrix": {
+      "title": "By harness",
+      "sub": "pass@1 leaves out cells whose verifier produced no result; failed cells count as unsolved",
+      "solved": "Solved",
+      "meanToolCalls": "Tool calls (mean, scored)"
     }
   },
   "overview": {

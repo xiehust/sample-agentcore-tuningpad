@@ -20,11 +20,11 @@ from typing import Any
 
 from ..core import aws
 from ..core.db import session_scope
-from ..core.errors import NotFound
+from ..core.errors import AppError, NotFound
 from ..models import Dataset, Eval
 from . import datasets as dsvc
 
-STATES = ("scored", "truncated", "acr_failed", "invoke_failed")
+STATES = ("scored", "truncated", "acr_failed", "invoke_failed", "unscored")
 FAILED = {"acr_failed", "invoke_failed"}
 TEXT_MAX = 20_000  # characters per text block
 MSG_MAX = 200  # messages per transcript
@@ -69,7 +69,103 @@ def sample_state(item: dict[str, Any]) -> str:
         return "truncated"  # turn budget exhausted: scored 0, not an infra failure
     if not item.get("success"):
         return "acr_failed" if item.get("failure") == "agent" else "invoke_failed"
+    if reward_of(result) is None and result.get("stop_reason") == "verifier_no_result":
+        return "unscored"  # the Task's Verifier produced nothing: neither right nor wrong
     return "scored" if reward_of(result) is not None else "acr_failed"
+
+
+# ---------------- the per-Harness matrix ----------------
+
+
+def eval_cells(payloads: list[dict[str, Any]], harnesses: list[str] | None) -> list[dict[str, Any]]:
+    """One cell per Task, or per Task × Harness (the eval's Harnesses replace a dataset's
+    own column). Each cell is run once."""
+    if not harnesses:
+        return [{"task_index": i, "harness": None, "payload": p} for i, p in enumerate(payloads)]
+    return [
+        {"task_index": i, "harness": h, "payload": {**p, "harness": h}}
+        for i, p in enumerate(payloads)
+        for h in harnesses
+    ]
+
+
+def tool_calls_of(item: dict[str, Any]) -> int | None:
+    """The Agent's own count (multi_harness metrics), else tool uses in the transcript."""
+    n = ((item.get("result") or {}).get("metrics") or {}).get("tool_calls")
+    if isinstance(n, int | float) and not isinstance(n, bool):
+        return int(n)
+    return None
+
+
+def solved(item: dict[str, Any]) -> bool:
+    if sample_state(item) != "scored":
+        return False
+    correct = ((item.get("result") or {}).get("metrics") or {}).get("correct")
+    if correct is not None:
+        return bool(correct)
+    return (reward_of(item.get("result")) or 0.0) >= 1.0
+
+
+def harness_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """pass@1 over the cells that could be graded (unscored ones excluded, failed ones count
+    as unsolved), and mean tool calls over scored cells."""
+    states = [sample_state(it) for it in items]
+    unscored = states.count("unscored")
+    graded = len(items) - unscored
+    n_solved = sum(solved(it) for it in items)
+    calls = [
+        c
+        for it, st in zip(items, states, strict=True)
+        if st == "scored"
+        if (c := tool_calls_of(it)) is not None
+    ]
+    return {
+        "n": len(items),
+        "scored": states.count("scored"),
+        "unscored": unscored,
+        "failed": sum(st in FAILED for st in states),
+        "solved": n_solved,
+        "pass_at_1": round(n_solved / graded, 4) if graded else None,
+        "mean_tool_calls": round(sum(calls) / len(calls), 2) if calls else None,
+    }
+
+
+def by_harness(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        if it.get("harness"):
+            groups.setdefault(it["harness"], []).append(it)
+    return {h: harness_summary(g) for h, g in groups.items()} or None
+
+
+def compare(items: list[dict[str, Any]], other: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per Harness: pass@1 of both evals, and tool calls on the Tasks both solved."""
+    key = lambda it: (it.get("task_index", it["index"]), it.get("harness"))  # noqa: E731
+    theirs = {key(it): it for it in other}
+    out: dict[str, Any] = {}
+    for h in sorted({it.get("harness") or "" for it in items + other}):
+        mine = [it for it in items if (it.get("harness") or "") == h]
+        their = [it for it in other if (it.get("harness") or "") == h]
+        both = [
+            (it, theirs[key(it)])
+            for it in mine
+            if key(it) in theirs and solved(it) and solved(theirs[key(it)])
+        ]
+        pairs = [(tool_calls_of(a), tool_calls_of(b)) for a, b in both]
+        pairs = [(a, b) for a, b in pairs if a is not None and b is not None]
+        a_mean = round(sum(a for a, _ in pairs) / len(pairs), 2) if pairs else None
+        b_mean = round(sum(b for _, b in pairs) / len(pairs), 2) if pairs else None
+        out[h] = {
+            "pass_at_1": harness_summary(mine)["pass_at_1"],
+            "other_pass_at_1": harness_summary(their)["pass_at_1"],
+            "both_solved": len(both),
+            "mean_tool_calls": a_mean,
+            "other_mean_tool_calls": b_mean,
+            "tool_call_change": round(a_mean / b_mean - 1, 4)
+            if a_mean is not None and b_mean
+            else None,
+        }
+    return out
 
 
 def session_id_of(item: dict[str, Any]) -> str | None:
@@ -236,9 +332,13 @@ def _counts(messages: Any) -> tuple[int, int]:
 def row_view(item: dict[str, Any]) -> dict[str, Any]:
     result = item.get("result") or {}
     turns, tools = _counts(result.get("messages"))
+    if (counted := tool_calls_of(item)) is not None:
+        tools = counted
     elapsed = item.get("elapsed")
     return {
         "index": item["index"],
+        "task_index": item.get("task_index", item["index"]),
+        "harness": item.get("harness"),
         "state": sample_state(item),
         "reward": reward_of(result),
         "status_code": result.get("status_code"),
@@ -314,9 +414,22 @@ def sample_detail(eval_id: str, index: int) -> dict[str, Any]:
     }
     return {
         **row_view(item),
-        "input": task_input(ev["dataset_id"], ev["split"], index),
+        "input": task_input(ev["dataset_id"], ev["split"], item.get("task_index", index)),
         "messages": messages,
         "messages_truncated": more,
         "traceback": _clip(redact(tb), TRACEBACK_MAX, tail=True)[0] or None,
         "extra": extra,
+    }
+
+
+def compare_evals(eval_id: str, other_id: str) -> dict[str, Any]:
+    ev, other = load_eval(eval_id), load_eval(other_id)
+    if (ev["dataset_id"], ev["split"]) != (other["dataset_id"], other["split"]):
+        raise AppError(
+            "eval.not_comparable", "only evals of the same dataset split can be compared"
+        )
+    return {
+        "eval_id": eval_id,
+        "other_id": other_id,
+        "by_harness": compare(load_items(ev), load_items(other)),
     }

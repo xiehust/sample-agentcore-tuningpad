@@ -198,6 +198,8 @@ class Eval(Base, TimestampMixin):
     # trace (waterfall) recording: run on the eval-only OTEL runtime of agent_runtime_id
     observe: Mapped[bool | None] = mapped_column(Boolean)
     obs_runtime_arn: Mapped[str | None] = mapped_column(String(512))
+    # Harnesses each Task runs under (one cell per Task × Harness); None: one cell per Task
+    harnesses: Mapped[list | None] = mapped_column(JSON)
     # bounds the CloudWatch Logs Insights window of the sample trace queries
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime)

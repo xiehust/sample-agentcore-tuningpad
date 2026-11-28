@@ -1621,7 +1621,7 @@ def test_choose_defaults_to_every_installed_harness():
     for installed, requested in ((NAMES, ["codex"]), (NAMES, []), (None, ["opencode"])):
         with pytest.raises(AppError) as e:
             ha.choose(installed, requested)
-        assert e.value.code == "run.harness_not_installed"
+        assert e.value.code == "harness.not_installed"
 
 
 # ---------------- S23: the API ----------------
@@ -1667,7 +1667,7 @@ def test_preview_rejects_harnesses_the_agent_does_not_have(
     stub_aws({"s3": _s3_with({"s3://b/t": _rows(4), "s3://b/v": _rows(2)}, {})})
     mode_request["harnesses"] = ["codex"]
     r = client.post("/api/runs/preview", json=mode_request)
-    assert r.json()["code"] == "run.harness_not_installed"
+    assert r.json()["code"] == "harness.not_installed"
     mode_request["harnesses"] = ["opencode"]
     assert client.post("/api/runs/preview", json=mode_request).status_code == 200
 

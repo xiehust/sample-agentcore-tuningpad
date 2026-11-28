@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { CheckGroup } from "../components/CheckGroup";
 import { JobPanel } from "../components/JobPanel";
 import { StatusTag } from "../components/StatusTag";
 import { ApiError, agentApi, datasetApi, errorMessage, obsApi, servingApi } from "../lib/api";
@@ -44,10 +45,14 @@ function EvalList() {
   const ep = ready.find((e) => e.id === form.endpoint_id);
   const runtimes = (agents.data ?? []).flatMap((a) => a.runtimes.filter((r) => r.status === "ready" && r.cluster_id && (!ep || r.cluster_id === ep.cluster_id)).map((r) => ({ a, r })));
   const rt = runtimes.find(({ r }) => r.id === form.agent_runtime_id)?.r;
+  // the Agent's Harnesses: every Task runs once under each picked one (default: all)
+  const installedHarnesses = (runtimes.find(({ r }) => r.id === form.agent_runtime_id)?.a.config.params?.harnesses as string[] | undefined) ?? [];
+  const [harnesses, setHarnesses] = useState<string[] | null>(null);
+  const pickedHarnesses = harnesses ?? installedHarnesses;
   const ds = (datasets.data ?? []).find((d) => d.id === form.dataset_id);
   const epName = (id: string) => endpoints.data?.find((e) => e.id === id)?.served_model_name ?? id;
   const create = async () => {
-    const r = await servingApi.createEval(form);
+    const r = await servingApi.createEval({ ...form, harnesses: installedHarnesses.length ? pickedHarnesses : null });
     setJob(r.job_id);
     setOpen(false);
     list.reload();
@@ -120,13 +125,18 @@ function EvalList() {
         />
       </Card>
       {/* hidden (not reset) while the Transaction Search confirm is up: one dialog owns Escape */}
-      <Modal open={open && tsRegion === null} title={t("evals.create")} onClose={() => setOpen(false)} footer={<><Button onClick={() => setOpen(false)}>{t("v2.common.cancel")}</Button><Button kind="primary" disabled={busy || !form.endpoint_id || !form.agent_runtime_id || !form.dataset_id} onClick={() => void submit()} testId="tp-eval-submit">{t("evals.run")}</Button></>}>
+      <Modal open={open && tsRegion === null} title={t("evals.create")} onClose={() => setOpen(false)} footer={<><Button onClick={() => setOpen(false)}>{t("v2.common.cancel")}</Button><Button kind="primary" disabled={busy || !form.endpoint_id || !form.agent_runtime_id || !form.dataset_id || (installedHarnesses.length > 0 && pickedHarnesses.length === 0)} onClick={() => void submit()} testId="tp-eval-submit">{t("evals.run")}</Button></>}>
         <div className="v2-form cols-2">
           <Field label={t("common.name")}><input className="v2-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label={t("evals.endpoint")}><Select value={form.endpoint_id} onChange={(v) => setForm({ ...form, endpoint_id: v })} placeholder="—" options={ready.map((e) => ({ value: e.id, label: e.served_model_name }))} /></Field>
-          <Field label={t("runs.runtime")}><Select value={form.agent_runtime_id} onChange={(v) => setForm({ ...form, agent_runtime_id: v })} placeholder="—" options={runtimes.map(({ a, r }) => ({ value: r.id, label: a.name }))} /></Field>
+          <Field label={t("runs.runtime")}><Select value={form.agent_runtime_id} onChange={(v) => { setForm({ ...form, agent_runtime_id: v }); setHarnesses(null); }} placeholder="—" options={runtimes.map(({ a, r }) => ({ value: r.id, label: a.name }))} /></Field>
           <Field label={t("evals.data")}><Select value={form.dataset_id} onChange={(v) => setForm({ ...form, dataset_id: v })} placeholder="—" options={(datasets.data ?? []).filter((d) => d.status === "ready").map((d) => ({ value: d.id, label: d.name }))} /></Field>
           {ds && <Field label={t("runs.valSplit")}><Select value={form.split} onChange={(v) => setForm({ ...form, split: v })} options={Object.keys(ds.splits).map((k) => ({ value: k, label: `${k} (${ds.splits[k].rows})` }))} /></Field>}
+          {installedHarnesses.length > 0 && (
+            <Field label={t("runs.harnesses")} hint={t("evals.harnessesHint")} full>
+              <CheckGroup options={installedHarnesses} value={pickedHarnesses} onChange={setHarnesses} />
+            </Field>
+          )}
           <Field label={t("evals.limit")}><input className="v2-input" type="number" min={1} value={form.limit} onChange={(e) => setForm({ ...form, limit: Number(e.target.value) || 1 })} /></Field>
           <Field label={t("evals.observe")} hint={obsHint()} full>
             <label className="v2-check">
