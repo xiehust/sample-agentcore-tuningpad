@@ -732,7 +732,12 @@
     "agentLoop": "Rollout 设置",
     "harnesses": "Harness",
     "harnessesHint": "每个 Task 随机分到其中一个（数量均衡、固定 seed）；同一 Task 的所有 rollout 用同一个",
-    "harnessesWithSeed": "{{names}} · seed {{seed}}"
+    "harnessesWithSeed": "{{names}} · seed {{seed}}",
+    "harnessMetrics": "按 Harness 的验证指标",
+    "harnessMetricsSub": "每个验证 Task 在分配给它的 Harness 下运行；每步的训练指标没有按 Harness 拆分",
+    "harnessChartReward": "Reward",
+    "harnessChartCorrect": "答对率",
+    "harnessChartToolCalls": "工具调用"
   },
   "exports": {
     "how": "导出会在集群上用 verl.model_merger 把 FSDP / Megatron checkpoint 合并为 Hugging Face safetensors，再复制到 S3。可在训练任务的 Checkpoint 页签发起。",

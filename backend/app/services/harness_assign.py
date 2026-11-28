@@ -125,6 +125,8 @@ def stage_run_data(
         target = f"s3://{bucket}/runs/{run_id}/data/{split}.parquet"
         if not _exists(region, target):
             rows = assign(read_rows(region, uri), harnesses["names"], int(harnesses["seed"]))
+            # verl reports validation metrics per data_source: one set per Harness
+            rows = [{**r, "data_source": r["payload"]["harness"]} for r in rows]
             _write_rows(region, target, rows)
         out[split] = target
     return out

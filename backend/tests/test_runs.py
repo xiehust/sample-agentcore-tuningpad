@@ -1708,7 +1708,8 @@ def test_each_attempt_trains_on_the_same_assigned_rows(harness_agent, stub_aws):
     assert "s3://b/runs/run-1/data/train.parquet" in cm["data"]["train.sh"]
     assert "s3://b/t " not in cm["data"]["train.sh"]
     # the same seed always gives the same rows, so a retry trains on identical data
-    assert ha.assign(_rows(6), NAMES, 7) == train
+    expected = ha.assign(_rows(6), NAMES, 7)
+    assert [{k: v for k, v in r.items() if k != "data_source"} for r in train] == expected
 
 
 def test_runs_without_harnesses_use_the_dataset_as_is(run_env):
@@ -1753,3 +1754,46 @@ def test_a_dataset_may_name_any_installed_harness(client, mode_request, harness_
     )
     mode_request["harnesses"] = ["claude_code"]
     assert client.post("/api/runs/preview", json=mode_request).status_code == 200
+
+
+def test_run_data_names_the_harness_as_its_data_source(harness_agent, stub_aws):
+    """verl splits validation metrics by data_source: one set per Harness."""
+    uploads: dict = {}
+    stub_aws({"s3": _s3_with({"s3://b/t": _rows(4)}, uploads)})
+    out = ha.stage_run_data(
+        "run-1", "us-east-1", "b", {"train": "s3://b/t"}, {"names": NAMES, "seed": 0}
+    )
+    assert all(r["data_source"] == r["payload"]["harness"] for r in uploads[out["train"]])
+
+
+def test_multi_harness_forwards_correct_and_tool_calls_to_verl():
+    from app.templates_lib import get_template
+
+    loop = rt.agent_loop_settings(get_template("multi_harness")["agent_loop"], rt.merge_params({}))
+    assert loop["reward_extra_info_defaults"] == {"correct": 0.0, "tool_calls": 0.0}
+
+
+def test_run_views_report_validation_per_harness(client, run_env):
+    with session_scope() as s:
+        for step, cc, oc in ((0, 0.2, 0.4), (5, 0.6, 0.8)):
+            s.add(
+                RunMetric(
+                    run_id="run-1", step=step, key="val-core/claude_code/reward/mean@1", value=cc
+                )
+            )
+            s.add(
+                RunMetric(
+                    run_id="run-1", step=step, key="val-core/opencode/reward/mean@1", value=oc
+                )
+            )
+            s.add(
+                RunMetric(
+                    run_id="run-1", step=step, key="val-aux/opencode/tool_calls/mean@1", value=9.0
+                )
+            )
+    listed = next(r for r in client.get("/api/runs").json() if r["id"] == "run-1")
+    assert listed["summary"]["val_reward"] == pytest.approx(0.7)
+    d = client.get("/api/runs/run-1").json()
+    assert d["summary"]["baseline_val_reward"] == pytest.approx(0.3)
+    assert d["by_source"]["opencode"]["reward"] == [[0, 0.4], [5, 0.8]]
+    assert d["by_source"]["opencode"]["tool_calls"] == [[0, 9.0], [5, 9.0]]

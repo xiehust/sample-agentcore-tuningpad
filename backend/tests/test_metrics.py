@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.metrics import verl_log
 
 SAMPLE = (Path(__file__).parent / "fixtures" / "verl_train_sample.log").read_text()
@@ -54,3 +56,25 @@ def test_parses_toolkit_rollout_failure_metrics():
         "agent_loop/acr_failed/mean": 0.0234375,
     }
     assert set(m) <= set(verl_log.KEY_METRICS)  # charted on the Runs health panel
+
+
+def test_validation_reward_averages_over_data_sources():
+    """Multi-Harness runs set data_source to the Harness, so verl reports one validation
+    reward per Harness: the run's validation reward is their mean."""
+    from app.metrics import verl_log
+
+    metrics = {
+        0: {"val-core/claude_code/reward/mean@1": 0.2, "val-core/opencode/reward/mean@1": 0.4},
+        5: {
+            "val-core/claude_code/reward/mean@1": 0.6,
+            "val-core/opencode/reward/mean@1": 0.8,
+            "critic/score/mean": 0.5,
+        },
+    }
+    s = verl_log.summarize(metrics)
+    assert s["baseline_val_reward"] == pytest.approx(0.3)
+    assert s["val_reward"] == pytest.approx(0.7) and s["best_step"] == 5
+    assert verl_log.by_source(metrics[5]) == {
+        "claude_code": {"reward": 0.6},
+        "opencode": {"reward": 0.8},
+    }

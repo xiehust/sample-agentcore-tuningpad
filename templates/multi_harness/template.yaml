@@ -53,6 +53,8 @@ agent_loop:
   max_turns_per_sid: 40
   # harnesses send their own temperature/top_p: sample with the trainer's instead
   override_client_sampling: true
+  # the Agent's result metrics verl reports (validation: per Harness, as val-aux/<harness>/...)
+  reward_extra_info_defaults: {correct: 0.0, tool_calls: 0.0}
 smoke_payloads: []             # filled from the generated dataset (first two val rows)
 # The toolkit caps a session's whole context at max_response_length (prompt overflow moves
 # into the response region), so 65536 is the real per-rollout context budget here.

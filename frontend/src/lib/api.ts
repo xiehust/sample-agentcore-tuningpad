@@ -674,6 +674,8 @@ export interface RunView {
   job: Job | null;
   summary: RunSummary;
   series?: Record<string, [number, number][]>;
+  /** validation per data source (per Harness in multi-Harness runs): {source: {variable: [[step, value]]}} */
+  by_source?: Record<string, Record<string, [number, number][]>>;
   metric_keys?: string[];
 }
 

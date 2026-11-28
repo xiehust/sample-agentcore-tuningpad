@@ -66,15 +66,40 @@ def parse_chunk(carry: str, chunk: str) -> tuple[list[tuple[int, dict[str, float
     return recs, carry_out
 
 
+_VAL = re.compile(r"^val-(?:core|aux)/(?P<src>[^/]+)/(?P<var>[^/]+)/mean@1$")
+
+
+def by_source(step_metrics: dict[str, float]) -> dict[str, dict[str, float]]:
+    """Validation means per data_source (a multi-Harness run's data_source is the Harness):
+    {source: {variable: value}} from `val-core|val-aux/<source>/<variable>/mean@1`."""
+    out: dict[str, dict[str, float]] = {}
+    for key, value in step_metrics.items():
+        if m := _VAL.match(key):
+            out.setdefault(m["src"], {})[m["var"]] = value
+    return out
+
+
+def source_series(metrics: dict[int, dict[str, float]]) -> dict[str, dict[str, list]]:
+    """{source: {variable: [[step, value], ...]}} over a run's steps."""
+    out: dict[str, dict[str, list]] = {}
+    for step in sorted(metrics):
+        for src, vars_ in by_source(metrics[step]).items():
+            for var, value in vars_.items():
+                out.setdefault(src, {}).setdefault(var, []).append([step, value])
+    return out
+
+
+def _val_reward(step_metrics: dict[str, float]) -> float | None:
+    """The step's validation reward: the mean over data sources (one for most runs)."""
+    rewards = [v["reward"] for v in by_source(step_metrics).values() if "reward" in v]
+    return sum(rewards) / len(rewards) if rewards else None
+
+
 def summarize(metrics: dict[int, dict[str, float]]) -> dict[str, float | int | None]:
     if not metrics:
         return {"last_step": None}
     last = max(metrics)
-    val = {
-        s: m["val-core/unknown/reward/mean@1"]
-        for s, m in metrics.items()
-        if "val-core/unknown/reward/mean@1" in m
-    }
+    val = {s: r for s, m in metrics.items() if (r := _val_reward(m)) is not None}
     best_step = max(val, key=lambda s: val[s]) if val else None
     timing = [m["timing_s/step"] for m in metrics.values() if "timing_s/step" in m]
     return {

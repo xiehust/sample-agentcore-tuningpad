@@ -732,7 +732,12 @@
     "agentLoop": "Rollout settings",
     "harnesses": "Harnesses",
     "harnessesHint": "Each Task gets one of these at random (balanced, fixed seed); all rollouts of a Task use the same one",
-    "harnessesWithSeed": "{{names}} · seed {{seed}}"
+    "harnessesWithSeed": "{{names}} · seed {{seed}}",
+    "harnessMetrics": "Validation by harness",
+    "harnessMetricsSub": "Each validation Task runs under its assigned harness; per-step training metrics are not split by harness",
+    "harnessChartReward": "Reward",
+    "harnessChartCorrect": "Correct",
+    "harnessChartToolCalls": "Tool calls"
   },
   "exports": {
     "how": "Exports merge a FSDP / Megatron checkpoint into Hugging Face safetensors with verl.model_merger on the cluster, then copy it to S3. Start one from a run's Checkpoints tab.",

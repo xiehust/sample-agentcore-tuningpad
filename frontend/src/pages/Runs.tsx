@@ -472,6 +472,33 @@ function RunWizard() {
   );
 }
 
+/** Validation metrics per Harness: verl reports them per data_source, which a
+ * multi-Harness run sets to the Harness. */
+function HarnessCharts({ names, bySource }: { names: string[]; bySource: Record<string, Record<string, [number, number][]>> }) {
+  const { t } = useTranslation();
+  const charts: { variable: string; title: string; fixed01?: boolean }[] = [
+    { variable: "reward", title: "runs.harnessChartReward" },
+    { variable: "correct", title: "runs.harnessChartCorrect", fixed01: true },
+    { variable: "tool_calls", title: "runs.harnessChartToolCalls" },
+  ];
+  return (
+    <Card title={t("runs.harnessMetrics")} sub={t("runs.harnessMetricsSub")}>
+      <div className="tp-grid c3">
+        {charts.map((c) => (
+          <div key={c.variable}>
+            <div className="v2-muted" style={{ marginBottom: 6 }}>{t(c.title)}</div>
+            <LineChart
+              fixed01={c.fixed01}
+              empty={t("runs.noMetrics")}
+              series={names.map((h) => ({ name: h, points: bySource[h]?.[c.variable] ?? [] })).filter((x) => x.points.length)}
+            />
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /* --------------------------------------------------------------- detail */
 
 function RunLog({ id, live }: { id: string; live: boolean }) {
@@ -578,6 +605,9 @@ function RunDetail({ id }: { id: string }) {
             { value: "config", label: t("runs.tabConfig") },
           ]}
         />
+        {tab === "metrics" && run.spec.harnesses && (
+          <HarnessCharts names={run.spec.harnesses.names} bySource={run.by_source ?? {}} />
+        )}
         {tab === "metrics" && (
           <div className="tp-grid c2">
             {CHARTS.map((c) => (
