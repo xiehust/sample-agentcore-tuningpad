@@ -17,8 +17,8 @@ from ..core.errors import AppError, NotFound
 from ..jobs.engine import JobCancelled, Stage, StageContext, register
 from ..metrics import verl_log
 from ..models import AgentRuntime, Dataset, Run, RunMetric, TrainerImage
+from ..services import harness_assign, kube, pools
 from ..services import hyperpod as hp
-from ..services import kube, pools
 from ..services import project as proj
 from ..services import runs as svc
 from ..templates_lib import get_template
@@ -78,12 +78,11 @@ def _context(run: dict[str, Any]) -> dict[str, Any]:
             agent_template = a.template_id if a else None
         res = proj.require_region(c["region"])
         bucket = res["bucket"]
-        val_split = run["spec"].get("val_split", "val")
-        data = {"train": tr.splits["train"]["s3_uri"] if tr and "train" in tr.splits else None}
-        if va and val_split in va.splits:
-            data["val"] = va.splits[val_split]["s3_uri"]
-        elif tr and "val" in tr.splits and not va:
-            data["val"] = tr.splits["val"]["s3_uri"]
+        data = svc.dataset_uris(
+            tr.splits if tr else None,
+            va.splits if va else None,
+            run["spec"].get("val_split", "val"),
+        )
         return {
             "cluster": c,
             "runtime_arn": rt.runtime_arn if rt else None,
@@ -273,6 +272,11 @@ def stage_capacity(ctx: StageContext) -> None:
 
 def _submit(ctx: StageContext, run: dict[str, Any], attempt: int) -> str:
     c = _context(run)
+    if run["spec"].get("harnesses"):
+        # the run's own copy of the data with a Harness per Task (identical every attempt)
+        c["datasets"] = harness_assign.stage_run_data(
+            run["id"], c["cluster"]["region"], c["bucket"], c["datasets"], run["spec"]["harnesses"]
+        )
     tpl = get_template(c["template_id"]) if c["template_id"] else {}
     objs = svc.render(
         run,

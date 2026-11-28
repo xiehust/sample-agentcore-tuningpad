@@ -626,6 +626,8 @@ export interface CreateRunBody {
   tuning: string;
   training_mode?: TrainingMode;
   params: Record<string, unknown>;
+  /** Harnesses to spread the Tasks over; null for an Agent without Harnesses */
+  harnesses?: string[] | null;
   compute: RunCompute;
   confirm_cost?: boolean;
 }
@@ -657,7 +659,7 @@ export interface RunView {
   train_dataset_id: string;
   val_dataset_id: string | null;
   model_id: string;
-  spec: { training_mode?: TrainingMode; plan: Plan; params: Record<string, unknown>; val_split: string; estimate?: RunEstimate; agent_loop?: Record<string, unknown> };
+  spec: { training_mode?: TrainingMode; plan: Plan; params: Record<string, unknown>; val_split: string; estimate?: RunEstimate; agent_loop?: Record<string, unknown>; harnesses?: RunHarnesses };
   compute: RunCompute;
   status: string;
   rayjob_name: string | null;
@@ -696,12 +698,19 @@ export interface TrainerImageView {
   job: Job | null;
 }
 
+/** The Harnesses a run spreads its Tasks over, and the seed of that assignment. */
+export interface RunHarnesses {
+  names: string[];
+  seed: number;
+}
+
 export interface RunPreview {
   training_mode: TrainingMode;
   plan: Plan;
   params: Record<string, unknown>;
   /** the run's rollout settings, stored as spec.agent_loop and rendered for every attempt */
   agent_loop: Record<string, unknown>;
+  harnesses: RunHarnesses | null;
   model: ModelCheck;
   estimate: RunEstimate;
   training_plan: TrainingPlan | null;

@@ -161,6 +161,10 @@ function RunWizard() {
     [agents.data],
   );
   const chosen = runtimes.find((x) => x.rt.id === runtimeId);
+  // Harnesses in the chosen Agent's image; the run spreads its Tasks over the picked ones
+  const installedHarnesses = (chosen?.agent.config.params?.harnesses as string[] | undefined) ?? [];
+  const [harnesses, setHarnesses] = useState<string[] | null>(null);
+  const pickedHarnesses = harnesses ?? installedHarnesses;
   const tpl = templates.data?.find((x) => x.id === chosen?.agent.template_id);
   const cluster = clusters.data?.find((c) => c.id === chosen?.rt.cluster_id);
   const readyDatasets = (datasets.data ?? []).filter((d) => d.status === "ready");
@@ -191,6 +195,7 @@ function RunWizard() {
   const body = (): CreateRunBody => ({
     name, agent_runtime_id: runtimeId, train_dataset_id: trainId, val_dataset_id: valId || null,
     val_split: valSplit, model_id: modelId, prefer, tuning, training_mode: trainingMode,
+    harnesses: installedHarnesses.length ? pickedHarnesses : null,
     params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")),
     compute: { ...compute, training_plan_arn: compute.capacity === "training_plan" ? compute.training_plan_arn?.trim() || null : null },
   });
@@ -199,7 +204,7 @@ function RunWizard() {
   const deadlineValid = !asyncMode || (typeof compute.max_hours === "number"
     && Number.isFinite(compute.max_hours) && compute.max_hours <= 720
     && Math.trunc(compute.max_hours * 3600) >= 1);
-  const canNext = [!!runtimeId && !!name, !!trainId, !!modelId && defaultsReady && deadlineValid,
+  const canNext = [!!runtimeId && !!name && (installedHarnesses.length === 0 || pickedHarnesses.length > 0), !!trainId, !!modelId && defaultsReady && deadlineValid,
     !!compute.instance_type && compute.nodes > 0 && deadlineValid && (compute.capacity !== "training_plan" || planOk), true][step];
   const canSubmit = deadlineValid && !!preview && preview.training_mode === trainingMode;
 
@@ -261,12 +266,28 @@ function RunWizard() {
               <Field label={t("runs.runtime")} required hint={t("runs.runtimeHint")}>
                 <Select
                   value={runtimeId}
-                  onChange={setRuntimeId}
+                  onChange={(v: string) => { setRuntimeId(v); setHarnesses(null); }}
                   placeholder={t("runs.pickRuntime")}
                   options={runtimes.map(({ agent, rt }) => ({ value: rt.id, label: `${agent.name} · ${(clusters.data ?? []).find((c) => c.id === rt.cluster_id)?.name ?? rt.cluster_id}` }))}
                 />
               </Field>
             </div>
+            {installedHarnesses.length > 0 && (
+              <Field label={t("runs.harnesses")} hint={t("runs.harnessesHint")} full>
+                <div className="tp-row">
+                  {installedHarnesses.map((h) => (
+                    <label key={h} className="tp-row">
+                      <input
+                        type="checkbox"
+                        checked={pickedHarnesses.includes(h)}
+                        onChange={(e) => setHarnesses(e.target.checked ? installedHarnesses.filter((x) => x === h || pickedHarnesses.includes(x)) : pickedHarnesses.filter((x) => x !== h))}
+                      />
+                      <span className="tp-mono">{h}</span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
             {runtimes.length === 0 && !agents.loading && <Alert tone="warn">{t("runs.noRuntime")}</Alert>}
           </Card>
         </div>
@@ -435,6 +456,7 @@ function RunWizard() {
                   : []),
                 { label: t("runs.params"), value: <span className="tp-mono">{JSON.stringify(body().params)}</span> },
                 { label: t("runs.agentLoop"), value: <span className="tp-mono">{JSON.stringify(preview.agent_loop)}</span> },
+                ...(preview.harnesses ? [{ label: t("runs.harnesses"), value: <span className="tp-mono">{preview.harnesses.names.join(", ")}</span> }] : []),
               ]}
             />
           </Card>
@@ -624,6 +646,7 @@ function RunDetail({ id }: { id: string }) {
                 { label: t("clusters.capacity"), value: run.compute.training_plan_arn ? <span className="tp-mono">{run.compute.training_plan_arn.split("/").pop()}</span> : t(`clusters.capacity_${run.compute.capacity ?? "on_demand"}`) },
                 { label: "RayJob", value: <span className="tp-mono">{run.rayjob_name ?? "—"}</span> },
                 ...(run.spec.agent_loop ? [{ label: t("runs.agentLoop"), value: <span className="tp-mono">{JSON.stringify(run.spec.agent_loop)}</span> }] : []),
+                ...(run.spec.harnesses ? [{ label: t("runs.harnesses"), value: <span className="tp-mono">{`${run.spec.harnesses.names.join(", ")} · seed ${run.spec.harnesses.seed}`}</span> }] : []),
                 { label: t("runs.retries"), value: `${run.retries} / ${run.compute.max_retries}` },
                 { label: t("common.created"), value: dateTime(run.created_at) },
               ]}

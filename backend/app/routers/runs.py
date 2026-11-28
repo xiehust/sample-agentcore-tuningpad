@@ -22,8 +22,8 @@ from ..render.train import (
     merge_params,
 )
 from ..services import agents as agents_svc
+from ..services import harness_assign, pools
 from ..services import hyperpod as hp
-from ..services import pools
 from ..services import project as proj
 from ..services import runs as svc
 
@@ -64,6 +64,8 @@ class CreateRun(BaseModel):
     training_mode: TrainingMode = "sync"
     params: dict[str, Any] = Field(default_factory=dict)
     plan_overrides: dict[str, Any] = Field(default_factory=dict)
+    # Harnesses to spread the Tasks over (default: all the Agent has); None for others
+    harnesses: list[str] | None = None
     compute: Compute
     confirm_cost: bool = False
 
@@ -96,15 +98,21 @@ def _validate(body: CreateRun) -> dict[str, Any]:
 
         agent = s.get(Agent, rt.agent_id)
         template_id = agent.template_id if agent else None
+        installed = ((agent.config or {}).get("params") or {}).get("harnesses") if agent else None
         tr = s.get(Dataset, body.train_dataset_id)
         if not tr or tr.status != "ready":
             raise AppError("run.bad_dataset", "training dataset is not ready")
         if tr.region != region:
             raise AppError("run.region_mismatch", "dataset and cluster must be in the same region")
+        va = None
         if body.val_dataset_id:
             va = s.get(Dataset, body.val_dataset_id)
             if not va or va.status != "ready" or body.val_split not in (va.splits or {}):
                 raise AppError("run.bad_dataset", f"validation split {body.val_split} not found")
+        uris = svc.dataset_uris(tr.splits, va.splits if va else None, body.val_split)
+    harnesses = harness_assign.choose(installed, body.harnesses)
+    if harnesses:
+        harness_assign.validate_datasets(region, uris, harnesses)
     m = models.check_model(body.model_id)
     if not m.compatible:
         raise AppError("run.model_incompatible", m.reason or "model not supported by the gateway")
@@ -152,6 +160,9 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         "plan": p,
         "params": params,
         "agent_loop": agent_loop,
+        "harnesses": {"names": harnesses, "seed": harness_assign.DEFAULT_SEED}
+        if harnesses
+        else None,
         "model": m.to_dict(),
     }
 
@@ -173,6 +184,7 @@ def preview(body: CreateRun):
         "plan": v["plan"],
         "params": v["params"],
         "agent_loop": v["agent_loop"],
+        "harnesses": v["harnesses"],
         "model": v["model"],
         "estimate": _estimate(v["region"], body.compute, v["params"]),
         "training_plan": v["training_plan"],
@@ -207,6 +219,7 @@ def create(body: CreateRun):
                     "prefer": body.prefer,
                     "tuning": body.tuning,
                     "agent_loop": v["agent_loop"],
+                    **({"harnesses": v["harnesses"]} if v["harnesses"] else {}),
                     "estimate": est,
                 },
                 compute=body.compute.model_dump(),

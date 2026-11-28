@@ -1,6 +1,8 @@
+import collections
 import json
 import time
 
+import pandas as pd
 import pytest
 import yaml
 
@@ -11,6 +13,7 @@ from app.jobs import engine as eng
 from app.models import Agent, AgentRuntime, Cluster, Dataset, Job, Run, RunMetric
 from app.planner import plan
 from app.render import train as rt
+from app.services import harness_assign as ha
 from app.services import runs as rsvc
 
 
@@ -1578,3 +1581,128 @@ def test_claude_code_preset_previews_with_a_cost_estimate(client, mode_request):
     est = d.json()["estimate"]
     assert est["hourly_usd"] > 0 and est["max_cost_usd"] > 0
     assert d.json()["plan"]["strategy"] == "fsdp_lora"
+
+
+# ---------------- Harness assignment (#9) ----------------
+
+NAMES = ["claude_code", "opencode", "mini_swe_agent"]
+
+
+def _rows(n, **extra):
+    return [
+        {"payload": {"task_id": f"t{i}", **extra}, "prompt": [{"role": "user", "content": "q"}]}
+        for i in range(n)
+    ]
+
+
+# ---------------- S22: the assignment itself ----------------
+
+
+def test_assignment_is_balanced_and_repeatable():
+    out = ha.assign(_rows(10), NAMES, seed=3)
+    counts = collections.Counter(r["payload"]["harness"] for r in out)
+    assert set(counts) == set(NAMES) and max(counts.values()) - min(counts.values()) <= 1
+    assert ha.assign(_rows(10), NAMES, seed=3) == out
+    assert ha.assign(_rows(10), NAMES, seed=4) != out
+    # the rest of each row is untouched
+    assert [r["payload"]["task_id"] for r in out] == [f"t{i}" for i in range(10)]
+
+
+def test_rows_that_name_a_harness_keep_it():
+    given = _rows(3, harness="opencode") + _rows(3)
+    out = ha.assign(given, NAMES, seed=0)
+    assert [r["payload"]["harness"] for r in out[:3]] == ["opencode"] * 3
+    assert all(r["payload"]["harness"] in NAMES for r in out[3:])
+
+
+def test_choose_defaults_to_every_installed_harness():
+    assert ha.choose(NAMES, None) == NAMES
+    assert ha.choose(NAMES, ["opencode", "claude_code"]) == ["claude_code", "opencode"]
+    assert ha.choose(None, None) is None  # an Agent without Harnesses
+    for installed, requested in ((NAMES, ["codex"]), (NAMES, []), (None, ["opencode"])):
+        with pytest.raises(AppError) as e:
+            ha.choose(installed, requested)
+        assert e.value.code == "run.harness_not_installed"
+
+
+# ---------------- S23: the API ----------------
+
+
+@pytest.fixture
+def harness_agent(run_env):
+    with session_scope() as s:
+        a = s.get(Agent, "ag-x")
+        a.template_id = "multi_harness"
+        a.config = {"params": {"harnesses": NAMES}}
+    return run_env
+
+
+def _s3_with(dataset_rows: dict[str, list[dict]], uploads: dict):
+    def download_file(_args):
+        bucket, key, dest = _args
+        pd.DataFrame(dataset_rows[f"s3://{bucket}/{key}"]).to_parquet(dest, index=False)
+
+    def upload_file(_args):
+        src, bucket, key = _args
+        uploads[f"s3://{bucket}/{key}"] = pd.read_parquet(src).to_dict("records")
+
+    from tests.conftest import StubClient
+
+    return StubClient(download_file=download_file, upload_file=upload_file)
+
+
+def test_preview_rejects_harnesses_the_agent_does_not_have(
+    client, mode_request, harness_agent, stub_aws
+):
+    stub_aws({"s3": _s3_with({"s3://b/t": _rows(4), "s3://b/v": _rows(2)}, {})})
+    mode_request["harnesses"] = ["codex"]
+    r = client.post("/api/runs/preview", json=mode_request)
+    assert r.json()["code"] == "run.harness_not_installed"
+    mode_request["harnesses"] = ["opencode"]
+    assert client.post("/api/runs/preview", json=mode_request).status_code == 200
+
+
+def test_preview_rejects_a_dataset_naming_other_harnesses(
+    client, mode_request, harness_agent, stub_aws
+):
+    stub_aws({"s3": _s3_with({"s3://b/t": _rows(4, harness="codex"), "s3://b/v": _rows(2)}, {})})
+    r = client.post("/api/runs/preview", json=mode_request)
+    assert r.json()["code"] == "run.dataset_harness_invalid"
+
+
+def test_created_run_stores_harnesses_and_seed(client, mode_request, harness_agent, stub_aws):
+    from app.pipelines.run import load_run
+
+    stub_aws({"s3": _s3_with({"s3://b/t": _rows(4), "s3://b/v": _rows(2)}, {})})
+    mode_request["harnesses"] = ["claude_code", "opencode"]
+    created = client.post("/api/runs", json=mode_request).json()
+    spec = load_run(created["id"])["spec"]
+    assert spec["harnesses"] == {"names": ["claude_code", "opencode"], "seed": ha.DEFAULT_SEED}
+
+
+# ---------------- S24: the run pipeline ----------------
+
+
+def test_each_attempt_trains_on_the_same_assigned_rows(harness_agent, stub_aws):
+    uploads: dict = {}
+    stub_aws({"s3": _s3_with({"s3://b/t": _rows(6), "s3://b/v": _rows(3)}, uploads)})
+    with session_scope() as s:
+        r = s.get(Run, "run-1")
+        r.spec = {**r.spec, "harnesses": {"names": NAMES, "seed": 7}}
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    train = uploads["s3://b/runs/run-1/data/train.parquet"]
+    assert collections.Counter(r["payload"]["harness"] for r in train) == {n: 2 for n in NAMES}
+    assert uploads["s3://b/runs/run-1/data/val.parquet"]
+    cm = next(m for m in harness_agent["applied"] if m["kind"] == "ConfigMap")
+    assert "s3://b/runs/run-1/data/train.parquet" in cm["data"]["train.sh"]
+    assert "s3://b/t " not in cm["data"]["train.sh"]
+    # the same seed always gives the same rows, so a retry trains on identical data
+    assert ha.assign(_rows(6), NAMES, 7) == train
+
+
+def test_runs_without_harnesses_use_the_dataset_as_is(run_env):
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    cm = next(m for m in run_env["applied"] if m["kind"] == "ConfigMap")
+    assert "s3://b/t" in cm["data"]["train.sh"]

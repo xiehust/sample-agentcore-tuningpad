@@ -152,7 +152,9 @@
     "dataset.no_estimate": "这个内置数据集没有数据量估算。",
     "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。",
     "run.bad_history_mode": "History 模式只能是 linear 或 tree。",
-    "template.invalid_param": "模板参数的取值无效。"
+    "template.invalid_param": "模板参数的取值无效。",
+    "run.harness_not_installed": "至少选一个 Harness，且只能选这个 Agent 镜像里有的。",
+    "run.dataset_harness_invalid": "数据集指定了本次 run 没有选用的 Harness。"
   },
   "common": {
     "apply": "应用",
@@ -726,7 +728,9 @@
     "source_ec2": "EC2 节点组（EKS）",
     "computeSourceHpHint": "由 SageMaker HyperPod 管理：节点自动修复、深度健康检查、训练计划；受 HyperPod 配额限制。",
     "computeSourceEc2Hint": "EKS 托管节点组 + 普通 EC2 容量：按 EC2 价格和配额；自动创建或扩容。",
-    "agentLoop": "Rollout 设置"
+    "agentLoop": "Rollout 设置",
+    "harnesses": "Harness",
+    "harnessesHint": "每个 Task 随机分到其中一个（数量均衡、固定 seed）；同一 Task 的所有 rollout 用同一个"
   },
   "exports": {
     "how": "导出会在集群上用 verl.model_merger 把 FSDP / Megatron checkpoint 合并为 Hugging Face safetensors，再复制到 S3。可在训练任务的 Checkpoint 页签发起。",

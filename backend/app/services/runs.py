@@ -55,6 +55,22 @@ def validate_training_contract(
     return mode, params, int(hours * 3600) if hours else None
 
 
+def dataset_uris(
+    train_splits: dict[str, Any] | None, val_splits: dict[str, Any] | None, val_split: str
+) -> dict[str, str]:
+    """The train/val parquet a run trains on: the val dataset's split if one was picked,
+    else the train dataset's own val split."""
+    out = {}
+    if train_splits and "train" in train_splits:
+        out["train"] = train_splits["train"]["s3_uri"]
+    if val_splits is not None:
+        if val_split in val_splits:
+            out["val"] = val_splits[val_split]["s3_uri"]
+    elif train_splits and "val" in train_splits:
+        out["val"] = train_splits["val"]["s3_uri"]
+    return out
+
+
 def rollout_settings(template_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
     """A new run's rollout settings (its spec.agent_loop) for the Agent's template."""
     template_loop = (get_template(template_id).get("agent_loop") or {}) if template_id else {}
