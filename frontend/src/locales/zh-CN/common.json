@@ -150,7 +150,8 @@
     "dataset.harbor_mixed_images": "这些 Task 不共用同一个环境镜像。TuningPad 只接受共用单一镜像的 Task 集。",
     "dataset.harbor_invalid_task": "有 Task 不符合预期的 Harbor 格式，或者找不到它的输入文件。",
     "dataset.no_estimate": "这个内置数据集没有数据量估算。",
-    "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。"
+    "agent.overlay_link": "模板的 agent overlay 里有链接。模板 overlay 只能包含普通文件和目录。",
+    "run.bad_history_mode": "History 模式只能是 linear 或 tree。"
   },
   "common": {
     "apply": "应用",
@@ -526,7 +527,10 @@
     "test_freq": "每 N 步验证",
     "test_freq_hint": "",
     "max_actor_ckpt_to_keep": "FSx 保留 checkpoint 数",
-    "max_actor_ckpt_to_keep_hint": ""
+    "max_actor_ckpt_to_keep_hint": "",
+    "history_mode": "Gateway history 模式",
+    "history_mode_hint": "留空 = 模板默认（{{mode}}）；tree 按 harness 实际发送的内容训练，训练 token 更多",
+    "history_mode_template": "模板默认"
   },
   "agents": {
     "create": "新建 Agent",
@@ -720,7 +724,8 @@
     "source_hyperpod": "HyperPod 实例组",
     "source_ec2": "EC2 节点组（EKS）",
     "computeSourceHpHint": "由 SageMaker HyperPod 管理：节点自动修复、深度健康检查、训练计划；受 HyperPod 配额限制。",
-    "computeSourceEc2Hint": "EKS 托管节点组 + 普通 EC2 容量：按 EC2 价格和配额；自动创建或扩容。"
+    "computeSourceEc2Hint": "EKS 托管节点组 + 普通 EC2 容量：按 EC2 价格和配额；自动创建或扩容。",
+    "agentLoop": "Rollout 设置"
   },
   "exports": {
     "how": "导出会在集群上用 verl.model_merger 把 FSDP / Megatron checkpoint 合并为 Hugging Face safetensors，再复制到 S3。可在训练任务的 Checkpoint 页签发起。",

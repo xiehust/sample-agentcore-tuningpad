@@ -126,8 +126,10 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "max_actor_ckpt_to_keep": 3,
     "tps_limit": None,
     "max_rollout_time": None,
+    "history_mode": None,  # None = template agent_loop (linear when it names none)
     "enable_thinking": None,
 }
+HISTORY_MODES = ("linear", "tree")
 
 # Shared with the console; templates may override these agent-loop fallbacks.
 AGENT_LOOP_DEFAULTS = {
@@ -169,6 +171,8 @@ def merge_params(user: dict[str, Any] | None) -> dict[str, Any]:
             lo, hi = PARAM_BOUNDS[k]
             if not lo <= float(v) <= hi:
                 raise AppError("run.param_out_of_range", f"{k}={v} outside [{lo}, {hi}]")
+    if out["history_mode"] is not None and out["history_mode"] not in HISTORY_MODES:
+        raise AppError("run.bad_history_mode", f"history_mode must be one of {HISTORY_MODES}")
     if out["max_prompt_length"] > out["max_model_len"]:
         raise AppError("run.bad_lengths", "max_prompt_length must be ≤ max_model_len")
     return out
@@ -348,6 +352,32 @@ def overrides(
     return [f"{k}={_fmt(v)}" for k, v in o.items()]
 
 
+# Template agent_loop keys forwarded as-is (a run param of the same name wins, if any).
+TEMPLATE_LOOP_KEYS = (
+    "history_mode",
+    "linear_on_nonlinear",
+    "max_turns_per_sid",
+    "override_client_sampling",
+    "rollout_concurrency",
+    "reward_extra_info_defaults",
+    "reward_thresholds",
+)
+
+
+def agent_loop_settings(template_loop: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """The rollout settings a run gets: run params over the template's agent_loop over
+    TuningPad's fallbacks. Shown in the run preview and stored in the run spec."""
+    out: dict[str, Any] = {
+        k: params.get(k) or template_loop.get(k, default)
+        for k, default in AGENT_LOOP_DEFAULTS.items()
+    }
+    for k in TEMPLATE_LOOP_KEYS:
+        v = params.get(k) if params.get(k) is not None else template_loop.get(k)
+        if v is not None:
+            out[k] = v
+    return out
+
+
 def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> str:
     """AgentCoreAgentLoop kwargs (cannot be set via Hydra CLI; verl reads this file)."""
     loop: dict[str, Any] = {
@@ -358,26 +388,13 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
             "backend": ROLLOUT_SESSION_BACKEND,
             "agentcore_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
         },
-        **{
-            k: params.get(k) or template_loop.get(k, default)
-            for k, default in AGENT_LOOP_DEFAULTS.items()
-        },
+        **agent_loop_settings(template_loop, params),
         "gateway_port": GATEWAY_PORT,
         # The port is reachable from the agents' VPC ENIs: only pre-registered sessions.
         # Added by the pinned fork (upstream PR awslabs/agentcore-rl-toolkit#250); the
         # trainer image build asserts it is wired (the loop would swallow it silently).
         "require_registered_sessions": True,
     }
-    for k in (
-        "history_mode",
-        "linear_on_nonlinear",
-        "override_client_sampling",
-        "rollout_concurrency",
-        "reward_extra_info_defaults",
-        "reward_thresholds",
-    ):
-        if template_loop.get(k) is not None:
-            loop[k] = template_loop[k]
     return yaml.safe_dump([loop], sort_keys=False)
 
 

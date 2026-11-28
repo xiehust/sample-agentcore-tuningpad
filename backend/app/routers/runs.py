@@ -14,7 +14,13 @@ from ..models import AgentRuntime, Dataset, Run, RunMetric
 from ..pipelines import cluster as pc
 from ..pipelines.run import load_run
 from ..planner import plan as make_plan
-from ..render.train import AGENT_LOOP_DEFAULTS, DEFAULT_PARAMS, TrainingMode, merge_params
+from ..render.train import (
+    AGENT_LOOP_DEFAULTS,
+    DEFAULT_PARAMS,
+    TrainingMode,
+    agent_loop_settings,
+    merge_params,
+)
 from ..services import agents as agents_svc
 from ..services import hyperpod as hp
 from ..services import pools
@@ -122,8 +128,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         {"training_mode": body.training_mode, "plan": p, "params": body.params},
         body.compute.model_dump(),
     )
-    if template_id:
-        get_template(template_id)
+    template_loop = (get_template(template_id).get("agent_loop") or {}) if template_id else {}
     plan_info = None
     if body.compute.provider == "ec2" and body.compute.capacity == "training_plan":
         raise AppError("nodegroup.bad_capacity", "EC2 node groups use On-Demand or Spot capacity")
@@ -147,6 +152,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         "region": region,
         "plan": p,
         "params": params,
+        "agent_loop": agent_loop_settings(template_loop, params),
         "model": m.to_dict(),
     }
 
@@ -163,6 +169,7 @@ def preview(body: CreateRun):
         "training_mode": v["training_mode"],
         "plan": v["plan"],
         "params": v["params"],
+        "agent_loop": v["agent_loop"],
         "model": v["model"],
         "estimate": _estimate(v["region"], body.compute, v["params"]),
         "training_plan": v["training_plan"],
@@ -196,6 +203,7 @@ def create(body: CreateRun):
                     "val_split": body.val_split,
                     "prefer": body.prefer,
                     "tuning": body.tuning,
+                    "agent_loop": v["agent_loop"],
                     "estimate": est,
                 },
                 compute=body.compute.model_dump(),

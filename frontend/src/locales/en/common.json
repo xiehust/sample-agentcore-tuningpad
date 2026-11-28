@@ -150,7 +150,8 @@
     "dataset.harbor_mixed_images": "These Tasks do not share one environment image. TuningPad only accepts Task sets with a single shared image.",
     "dataset.harbor_invalid_task": "A Task is not in the expected Harbor format or its input files are missing.",
     "dataset.no_estimate": "This built-in dataset has no size estimate.",
-    "agent.overlay_link": "The template's agent overlay contains a link. Template overlays must contain only regular files and directories."
+    "agent.overlay_link": "The template's agent overlay contains a link. Template overlays must contain only regular files and directories.",
+    "run.bad_history_mode": "History mode must be linear or tree."
   },
   "common": {
     "apply": "Apply",
@@ -526,7 +527,10 @@
     "test_freq": "Validate every N steps",
     "test_freq_hint": "",
     "max_actor_ckpt_to_keep": "Checkpoints kept on FSx",
-    "max_actor_ckpt_to_keep_hint": ""
+    "max_actor_ckpt_to_keep_hint": "",
+    "history_mode": "Gateway history mode",
+    "history_mode_hint": "empty = template ({{mode}}); tree trains on exactly what the harness sent, at more training tokens",
+    "history_mode_template": "Template default"
   },
   "agents": {
     "create": "New agent",
@@ -720,7 +724,8 @@
     "source_hyperpod": "HyperPod instance group",
     "source_ec2": "EC2 node group (EKS)",
     "computeSourceHpHint": "Managed by SageMaker HyperPod: auto-repair, deep health checks, training plans; HyperPod quotas apply.",
-    "computeSourceEc2Hint": "EKS managed node group with plain EC2 capacity: EC2 prices and quotas; created or scaled automatically."
+    "computeSourceEc2Hint": "EKS managed node group with plain EC2 capacity: EC2 prices and quotas; created or scaled automatically.",
+    "agentLoop": "Rollout settings"
   },
   "exports": {
     "how": "Exports merge a FSDP / Megatron checkpoint into Hugging Face safetensors with verl.model_merger on the cluster, then copy it to S3. Start one from a run's Checkpoints tab.",

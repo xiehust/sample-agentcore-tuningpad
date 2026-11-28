@@ -33,5 +33,28 @@ payload:
   required: [task_id, task_uri, input_uri]
   explicit_prompt_column: true
 dataset: {builtin: smoldataenvs}
+agent_loop:
+  max_tokens_per_turn: 4096
+  max_rollout_time: 1200
+  tps_limit: 8
+  # linear: the gateway generates on its own served tokens for earlier turns, so history a
+  # harness rewrote (repaired tool calls, re-spacing) is replaced by the model's original
+  # output; compaction and subagents still become separate training rows. A run can pick
+  # tree (advanced params) to train on exactly what the harness sent, at several times the
+  # training tokens for Claude Code.
+  history_mode: linear
+  linear_on_nonlinear: reset
+  # the one hard limit per rollout (429 past it); harness_max_turns stays looser
+  max_turns_per_sid: 40
+  # harnesses send their own temperature/top_p: sample with the trainer's instead
+  override_client_sampling: true
 smoke_payloads: []             # filled from the generated dataset (first two val rows)
-presets: []
+presets:
+  - id: qwen35-4b-fsdp-lora-claude-code
+    label: {en: "Qwen3.5-4B · 8×H100 · FSDP LoRA · Claude Code (not verified)", zh-CN: "Qwen3.5-4B · 8×H100 · FSDP LoRA · Claude Code（未验证）"}
+    model_id: Qwen/Qwen3.5-4B
+    instance_type: p5.48xlarge
+    nodes: 1
+    prefer: fsdp
+    tuning: lora
+    params: {train_batch_size: 16, rollout_n: 8, lr: 2.0e-5, total_epochs: 1, max_model_len: 65536, max_prompt_length: 32768, max_response_length: 32768, kl_loss_coef: 0.001, save_freq: 10, test_freq: 10, val_n: 1, gpu_memory_utilization: 0.5, enable_thinking: false}

@@ -152,7 +152,7 @@ function RunWizard() {
     instance_group: "gpu-p5", instance_type: "p5.48xlarge", nodes: 1, provider: "hyperpod", capacity: "on_demand",
     scale_up: true, scale_down_after: true, max_hours: 6, budget_usd: null, max_retries: 2,
   });
-  const [preview, setPreview] = useState<{ training_mode: TrainingMode; plan: Plan; estimate: RunEstimate; training_plan: TrainingPlan | null } | null>(null);
+  const [preview, setPreview] = useState<{ training_mode: TrainingMode; plan: Plan; estimate: RunEstimate; training_plan: TrainingPlan | null; agent_loop: Record<string, unknown> } | null>(null);
   const [planOk, setPlanOk] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -185,6 +185,8 @@ function RunWizard() {
     if (!p) return;
     setModelId(p.model_id);
     setCompute((c) => ({ ...c, instance_type: p.instance_type, nodes: p.nodes, instance_group: groupName(p.instance_type, c.capacity, c.provider) }));
+    setPrefer(p.prefer ?? "auto");
+    setTuning(p.tuning ?? "auto");
     setParams({ ...p.params });
   };
 
@@ -330,7 +332,16 @@ function RunWizard() {
           </Card>
           <details className="v2-card" style={{ padding: "16px 24px" }}>
             <summary className="v2-sec-title" style={{ cursor: "pointer" }}>{t("runs.advancedParams")}</summary>
-            <div className="v2-form cols-2">{ADVANCED_KEYS.map((k) => <NumField key={k} k={k} params={params} defaults={paramDefaults} setParams={setParams} />)}</div>
+            <div className="v2-form cols-2">
+              {ADVANCED_KEYS.map((k) => <NumField key={k} k={k} params={params} defaults={paramDefaults} setParams={setParams} />)}
+              <Field label={t("params.history_mode")} hint={t("params.history_mode_hint", { mode: String(tpl?.agent_loop.history_mode ?? "linear") })}>
+                <Select
+                  value={typeof params.history_mode === "string" ? params.history_mode : ""}
+                  onChange={(v: string) => setParams({ ...params, history_mode: v || undefined })}
+                  options={[{ value: "", label: t("params.history_mode_template") }, { value: "linear", label: "linear" }, { value: "tree", label: "tree" }]}
+                />
+              </Field>
+            </div>
           </details>
         </div>
       )}
@@ -425,6 +436,7 @@ function RunWizard() {
                   ? [{ label: t("clusters.trainingPlan"), value: <span className="tp-mono">{`${preview.training_plan.name} · ${preview.training_plan.az ?? preview.training_plan.az_id ?? ""} · ${dateTime(preview.training_plan.end)}`}</span> }]
                   : []),
                 { label: t("runs.params"), value: <span className="tp-mono">{JSON.stringify(body().params)}</span> },
+                { label: t("runs.agentLoop"), value: <span className="tp-mono">{JSON.stringify(preview.agent_loop)}</span> },
               ]}
             />
           </Card>
@@ -613,6 +625,7 @@ function RunDetail({ id }: { id: string }) {
                 { label: t("runs.computeSource"), value: t(`runs.source_${run.compute.provider ?? "hyperpod"}`) },
                 { label: t("clusters.capacity"), value: run.compute.training_plan_arn ? <span className="tp-mono">{run.compute.training_plan_arn.split("/").pop()}</span> : t(`clusters.capacity_${run.compute.capacity ?? "on_demand"}`) },
                 { label: "RayJob", value: <span className="tp-mono">{run.rayjob_name ?? "—"}</span> },
+                ...(run.spec.agent_loop ? [{ label: t("runs.agentLoop"), value: <span className="tp-mono">{JSON.stringify(run.spec.agent_loop)}</span> }] : []),
                 { label: t("runs.retries"), value: `${run.retries} / ${run.compute.max_retries}` },
                 { label: t("common.created"), value: dateTime(run.created_at) },
               ]}

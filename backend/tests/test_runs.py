@@ -1464,3 +1464,67 @@ def test_run_refuses_a_runtime_on_the_v01_contract(client, mode_request, run_env
     with session_scope() as s:
         assert (s.query(Run).count(), s.query(Job).count()) == counts
     assert not run_env["applied"]
+
+
+# ---------------- multi_harness training settings (#6) ----------------
+
+
+def test_multi_harness_agent_loop_settings():
+    from app.templates_lib import get_template
+
+    loop = get_template("multi_harness")["agent_loop"]
+    s = rt.agent_loop_settings(loop, rt.merge_params({}))
+    assert s["history_mode"] == "linear" and s["linear_on_nonlinear"] == "reset"
+    # the gateway's turn cap is the one hard limit on a rollout
+    assert s["max_turns_per_sid"] == 40
+    assert s["override_client_sampling"] is True
+    assert (s["max_rollout_time"], s["max_tokens_per_turn"]) == (1200, 4096)
+    # the rendered YAML is the same settings plus the fixed wiring
+    y = yaml.safe_load(rt.agent_loop_yaml(loop, rt.merge_params({})))[0]
+    assert {k: y[k] for k in s} == s and y["require_registered_sessions"] is True
+
+
+def test_history_mode_is_a_run_param_that_overrides_the_template():
+    from app.templates_lib import get_template
+
+    loop = get_template("multi_harness")["agent_loop"]
+    s = rt.agent_loop_settings(loop, rt.merge_params({"history_mode": "tree"}))
+    assert s["history_mode"] == "tree"
+    with pytest.raises(AppError) as e:
+        rt.merge_params({"history_mode": "graph"})
+    assert e.value.code == "run.bad_history_mode"
+
+
+def test_preview_and_run_spec_show_the_effective_agent_loop(client, mode_request):
+    from app.pipelines.run import load_run
+
+    mode_request["params"] = {"history_mode": "tree", "max_rollout_time": 900}
+    preview = client.post("/api/runs/preview", json=mode_request)
+    assert preview.status_code == 200, preview.text
+    loop = preview.json()["agent_loop"]
+    assert loop["history_mode"] == "tree" and loop["max_rollout_time"] == 900
+    created = client.post("/api/runs", json=mode_request).json()
+    assert load_run(created["id"])["spec"]["agent_loop"] == loop
+
+
+def test_claude_code_preset_plans_fsdp_lora():
+    from app.catalog.instances import CATALOG
+    from app.planner import plan
+    from app.templates_lib import get_template
+
+    t = get_template("multi_harness")
+    preset = next(p for p in t["presets"] if p["id"] == "qwen35-4b-fsdp-lora-claude-code")
+    assert set(preset["label"]) == {"en", "zh-CN"}
+    assert "not verified" in preset["label"]["en"] and "未验证" in preset["label"]["zh-CN"]
+    assert (preset["prefer"], preset["tuning"]) == ("fsdp", "lora")
+    params = rt.merge_params(preset["params"])
+    p = plan(
+        params_b=4.66,  # Qwen3.5-4B
+        spec=CATALOG[preset["instance_type"]],
+        nodes=preset["nodes"],
+        max_model_len=params["max_model_len"],
+        prefer=preset["prefer"],
+        tuning=preset["tuning"],
+    )
+    assert p.strategy == "fsdp_lora"
+    assert p.world_size == 8
