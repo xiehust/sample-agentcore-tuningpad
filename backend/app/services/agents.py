@@ -120,6 +120,20 @@ def safe_extract_zip(zip_path: Path, dest: Path, max_bytes: int = 200 * 1024**2)
         inner.rmdir()
 
 
+def _copy_overlay(src: Path, ctx: Path) -> None:
+    """Copy a template's agent/ overlay into the build context, keeping subdirectories.
+    Links are refused so nothing outside the template can end up in the image."""
+    for p in sorted(src.rglob("*")):
+        if p.is_symlink():
+            raise AppError("agent.overlay_link", f"template overlay contains a link: {p.name}")
+        dest = ctx / p.relative_to(src)
+        if p.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, dest)
+
+
 def prepare_context(agent: dict[str, Any]) -> Path:
     ctx = build_dir(agent["id"]) / "context"
     if ctx.exists():
@@ -138,11 +152,11 @@ def prepare_context(agent: dict[str, Any]) -> Path:
     with tempfile.TemporaryDirectory(prefix="toolkit-", dir=ctx.parent) as d:
         private = toolkit_source.copy_tracked(root, Path(d) / "toolkit", expected_revision=revision)
         if agent["source"] == "template":
-            tk = private / t["toolkit_dir"]
-            for f in t.get("toolkit_files", []):
-                shutil.copy2(tk / f, ctx / f)
-            for f in (template_dir(agent["template_id"]) / "agent").iterdir():
-                shutil.copy2(f, ctx / f.name)
+            if t.get("toolkit_dir"):
+                tk = private / t["toolkit_dir"]
+                for f in t.get("toolkit_files", []):
+                    shutil.copy2(tk / f, ctx / f)
+            _copy_overlay(template_dir(agent["template_id"]) / "agent", ctx)
             params = resolve_params(agent["template_id"], agent["config"].get("params"))
             (ctx / "tp_config.json").write_text(json.dumps(params, indent=2))
         toolkit_wheel(ctx, private)

@@ -50,6 +50,51 @@ def test_template_context_contains_config_and_toolkit_files(toolkit_repo, stub_t
     assert checks["errors"] == [] and checks["warnings"] == []
 
 
+@pytest.fixture
+def own_template(tmp_path, monkeypatch):
+    """A TuningPad-owned template (no toolkit example) added beside the real ones."""
+    import app.templates_lib as tl
+
+    real = dict(tl._load_all())
+    tdir = tmp_path / "templates" / "own"
+    overlay = tdir / "agent"
+    overlay.mkdir(parents=True)
+    (overlay / "Dockerfile").write_text("FROM scratch\n")
+    (overlay / "rl_app.py").write_text("# own entrypoint\n")
+    template = {"id": "own", "contract": "verl-v2", "params": [], "_dir": str(tdir)}
+    monkeypatch.setattr(tl, "_load_all", lambda: {**real, "own": template})
+    return overlay
+
+
+def test_template_without_toolkit_example_builds_from_its_overlay(
+    own_template, toolkit_repo, stub_toolkit_build
+):
+    agent = {"id": "ag-own", "source": "template", "template_id": "own", "config": {}}
+    ctx = svc.prepare_context(agent)
+    names = {p.name for p in ctx.iterdir()}
+    assert {"Dockerfile", "rl_app.py", "tp_config.json"} <= names
+    assert (ctx / "rl_app.py").read_text() == "# own entrypoint\n"
+    assert list((ctx / "dist").glob("agentcore_rl_toolkit-*.whl"))
+
+
+def test_template_overlay_subdirectories_keep_their_paths(
+    own_template, toolkit_repo, stub_toolkit_build
+):
+    (own_template / "harness" / "claude_code").mkdir(parents=True)
+    (own_template / "harness" / "claude_code" / "run.sh").write_text("#!/bin/sh\n")
+    agent = {"id": "ag-own", "source": "template", "template_id": "own", "config": {}}
+    ctx = svc.prepare_context(agent)
+    assert (ctx / "harness" / "claude_code" / "run.sh").read_text() == "#!/bin/sh\n"
+
+
+def test_template_overlay_links_are_refused(own_template, toolkit_repo, stub_toolkit_build):
+    (own_template / "creds").symlink_to(Path.home())
+    agent = {"id": "ag-own", "source": "template", "template_id": "own", "config": {}}
+    with pytest.raises(AppError) as e:
+        svc.prepare_context(agent)
+    assert e.value.code == "agent.overlay_link"
+
+
 def test_static_checks_catch_contract_violations(tmp_path):
     (tmp_path / "app.py").write_text("from bedrock_agentcore import BedrockAgentCoreApp\n")
     r = svc.static_checks(tmp_path)
