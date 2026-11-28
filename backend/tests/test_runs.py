@@ -189,6 +189,15 @@ def test_cleared_params_restore_defaults_and_explicit_zero_is_preserved():
     assert "trainer.total_training_steps" not in h
 
 
+def test_agent_loop_yaml_carries_override_client_sampling_only_when_declared():
+    declared = yaml.safe_load(
+        rt.agent_loop_yaml({"override_client_sampling": True}, rt.merge_params({}))
+    )[0]
+    assert declared["override_client_sampling"] is True
+    plain = yaml.safe_load(rt.agent_loop_yaml({}, rt.merge_params({})))[0]
+    assert "override_client_sampling" not in plain
+
+
 def test_agent_loop_yaml_forces_registered_sessions():
     y = yaml.safe_load(
         rt.agent_loop_yaml(

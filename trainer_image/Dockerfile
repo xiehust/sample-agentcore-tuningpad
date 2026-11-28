@@ -53,12 +53,14 @@ ENV PATH=/opt/toolkit/.venv/bin:/usr/local/cuda/bin:/opt/amazon/efa/bin:$PATH \
     CUDA_HOME=/usr/local/cuda \
     RAY_ENABLE_UV_RUN_RUNTIME_ENV=0 \
     TUNINGPAD_PROFILE=$PROFILE
-# The rendered agent-loop YAML sets require_registered_sessions, which the agent loop
-# would silently swallow if a toolkit revision lacked it: assert it is wired.
+# The rendered agent-loop YAML sets require_registered_sessions (and, for templates that
+# declare it, override_client_sampling), which the agent loop would silently swallow if
+# a toolkit revision lacked them: assert both are wired.
 RUN python -c "import inspect, verl, vllm, agentcore_rl_toolkit.backends.verl.trainer; \
 from agentcore_rl_toolkit.backends.verl.agent_loop import AgentCoreAgentLoop; \
 from agentcore_rl_toolkit.backends.verl.gateway_host import get_or_start_gateway; \
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway; \
 assert all('require_registered_sessions' in inspect.signature(f).parameters \
+           and 'override_client_sampling' in inspect.signature(f).parameters \
            for f in (AgentCoreAgentLoop.__init__, get_or_start_gateway, RolloutGateway.__init__)); \
 print('verl', verl.__version__, 'vllm', vllm.__version__)"

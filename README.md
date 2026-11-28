@@ -72,9 +72,12 @@ Configuration goes in `config/tuningpad.yaml` (see `config/tuningpad.example.yam
 
 The single source declaration is `backend/pyproject.toml`: Git URL
 `https://github.com/xiehust/agentcore-rl-toolkit.git` at full commit
-`4fd592c74682f315f412969f975c539c7070ece7`: awslabs main `a187900` plus the gateway
-`require_registered_sessions` guard (proposed upstream in
-[awslabs/agentcore-rl-toolkit#250](https://github.com/awslabs/agentcore-rl-toolkit/pull/250)).
+`e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8`: awslabs main `a187900` plus two opt-in gateway
+flags pending upstream: the `require_registered_sessions` guard
+([awslabs/agentcore-rl-toolkit#250](https://github.com/awslabs/agentcore-rl-toolkit/pull/250))
+and `override_client_sampling`, which makes the gateway ignore a harness's own
+`temperature`/`top_p`/`top_k`
+([#251](https://github.com/awslabs/agentcore-rl-toolkit/pull/251)).
 Toolkit 0.2 contract: agents use `AgentCoreRuntimeApp`, read `payload["_config"]` and
 return `{"reward": float}`. Agents and runtimes built for the 0.1 contract must be rebuilt
 and redeployed before they can train or be evaluated. The trainer image applies

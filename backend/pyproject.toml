@@ -31,7 +31,7 @@ dev = [
 
 [tool.uv.sources]
 # This fixed Git source is authoritative for installation and toolkit source consumers.
-agentcore-rl-toolkit = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git", rev = "4fd592c74682f315f412969f975c539c7070ece7" }
+agentcore-rl-toolkit = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git", rev = "e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8" }
 
 [tool.uv]
 package = false

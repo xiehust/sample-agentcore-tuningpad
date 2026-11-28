@@ -202,6 +202,8 @@ def test_dockerfile_applies_patches_and_asserts_the_session_guard():
     assert "patch -p0 --forward --batch" in text
     assert "megatron-bridge-cp-chunk1-clamp.diff" in text
     assert "'require_registered_sessions' in inspect.signature(f).parameters" in text
+    # templates may render override_client_sampling: the same silent-swallow risk
+    assert "'override_client_sampling' in inspect.signature(f).parameters" in text
     for target in (
         "AgentCoreAgentLoop.__init__",
         "get_or_start_gateway",

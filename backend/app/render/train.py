@@ -371,6 +371,7 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
     for k in (
         "history_mode",
         "linear_on_nonlinear",
+        "override_client_sampling",
         "rollout_concurrency",
         "reward_extra_info_defaults",
         "reward_thresholds",

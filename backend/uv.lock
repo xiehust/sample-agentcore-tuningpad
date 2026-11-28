@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 [[package]]
 name = "agentcore-rl-toolkit"
 version = "0.2.0"
-source = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=4fd592c74682f315f412969f975c539c7070ece7#4fd592c74682f315f412969f975c539c7070ece7" }
+source = { git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8#e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8" }
 
 [package.optional-dependencies]
 rollout = [
@@ -1657,7 +1657,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentcore-rl-toolkit", extras = ["rollout"], git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=4fd592c74682f315f412969f975c539c7070ece7" },
+    { name = "agentcore-rl-toolkit", extras = ["rollout"], git = "https://github.com/xiehust/agentcore-rl-toolkit.git?rev=e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8" },
     { name = "aws-bedrock-token-generator", specifier = "==1.1.0" },
     { name = "boto3", specifier = "==1.43.83" },
     { name = "fastapi", specifier = "==0.139.0" },
