@@ -515,7 +515,7 @@ export interface AgentRuntimeView {
   /** Agent contract of the deployed image; anything but "verl-v2" cannot be trained or evaluated. */
   contract: string | null;
   status: string;
-  last_smoke: { ok?: boolean; passed?: number; total?: number; model_id?: string; results?: { index: number; ok: boolean; reward?: unknown; rewards?: unknown; error?: string | null }[] };
+  last_smoke: { ok?: boolean; passed?: number; total?: number; model_id?: string; results?: { index: number; ok: boolean; reward?: unknown; rewards?: unknown; error?: string | null; warning?: string | null }[]; warnings?: string[] };
   /** Eval-only OTEL twin of this runtime (deployed by the first eval that records traces). */
   obs?: { runtime_id: string | null; status: string | null; error: string | null } | null;
   job: Job | null;

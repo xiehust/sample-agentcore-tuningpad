@@ -313,8 +313,12 @@ function AgentDetail({ id }: { id: string }) {
                 title: t("agents.smoke"),
                 render: (r) =>
                   r.last_smoke.total ? (
-                    <Tag tone={r.last_smoke.ok ? "green" : "red"}>
+                    <Tag
+                      tone={!r.last_smoke.ok ? "red" : r.last_smoke.warnings?.length ? "orange" : "green"}
+                      title={r.last_smoke.warnings?.length ? `${t("agents.smokeWarnings")}: ${r.last_smoke.warnings.join("; ")}` : undefined}
+                    >
                       {r.last_smoke.passed}/{r.last_smoke.total} · reward {(r.last_smoke.results ?? []).map((x) => JSON.stringify(x.reward ?? x.rewards ?? "✕")).join(", ")}
+                      {r.last_smoke.warnings?.length ? ` · ${t("agents.smokeWarnings")} ${r.last_smoke.warnings.length}` : ""}
                     </Tag>
                   ) : "—",
               },

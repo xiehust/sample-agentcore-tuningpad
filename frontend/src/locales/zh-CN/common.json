@@ -577,7 +577,8 @@
     "platformVersion": "平台版本",
     "platform_auto": "可用时使用 Runtime V2",
     "platform_V1": "Runtime V1",
-    "platform_V2": "Runtime V2（快照）"
+    "platform_V2": "Runtime V2（快照）",
+    "smokeWarnings": "警告"
   },
   "datasets": {
     "create": "新建数据集",

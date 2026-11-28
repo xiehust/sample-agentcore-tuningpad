@@ -1,11 +1,29 @@
 id: multi_harness
 name: {en: "Multi-harness (SmolDataEnvs data analysis)", zh-CN: "多 Harness（SmolDataEnvs 数据分析）"}
 description:
-  en: "Trains one model inside unmodified agent harnesses on SmolDataEnvs data-analysis tasks. Each Task's own verifier grades the answer after the harness exits."
-  zh-CN: "在不修改的 agent harness 里，用 SmolDataEnvs 数据分析任务训练同一个模型。Harness 退出后由 Task 自带的 Verifier 给答案打分。"
+  en: "Trains one model inside unmodified agent harnesses (Claude Code) on SmolDataEnvs data-analysis tasks. Each Task's own verifier grades the answer after the harness exits; correct answers earn a small bonus for fewer tool calls. Claude Code is not open source: it is installed from npm under Anthropic's terms, which you need to review yourself."
+  zh-CN: "在不修改的 agent harness（Claude Code）里，用 SmolDataEnvs 数据分析任务训练同一个模型。Harness 退出后由 Task 自带的 Verifier 给答案打分；答对时工具调用越少，加分越多。Claude Code 不是开源软件，从 npm 安装并受 Anthropic 条款约束，请自行确认。"
 contract: verl-v2
 verified: false
-params: []
+params:
+  - key: tool_bonus_cap
+    type: number
+    label: {en: "Tool-efficiency bonus cap", zh-CN: "工具效率加分上限"}
+    default: 0.1
+    min: 0
+    max: 0.5
+  - key: tool_call_budget
+    type: number
+    label: {en: "Tool calls at which the bonus reaches 0", zh-CN: "加分降为 0 的工具调用次数"}
+    default: 40
+    min: 1
+    max: 1000
+  - key: harness_max_turns
+    type: number
+    label: {en: "Harness turn limit (kept looser than the gateway cap)", zh-CN: "Harness 自身的轮数上限（比 gateway 上限宽松）"}
+    default: 200
+    min: 1
+    max: 10000
 payload:
   prompt_field: null           # payload carries S3 URIs; the prompt column is the Task instruction
   required: [task_id, task_uri, input_uri]

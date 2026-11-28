@@ -616,16 +616,19 @@ def smoke(
     if not payloads:
         raise AppError("agent.no_smoke_payloads", "no sample payloads to smoke-test with")
     base_url, token = bedrock_openai(region)
-    tasks = [
-        rollouts.with_config(
+    tasks = []
+    for p in payloads:
+        task = rollouts.with_config(
             p,
             base_url=base_url,
             model_id=model_id,
             api_key=token,
             sampling_params={"max_tokens": 1024},
         )
-        for p in payloads
-    ]
+        # Lets an agent whose harness cannot call this endpoint (Claude Code speaks only
+        # Anthropic Messages) switch to a Bedrock model it can use.
+        task["_config"]["smoke"] = True
+        tasks.append(task)
     results = []
 
     def on_result(rec: dict[str, Any]) -> None:
@@ -640,6 +643,7 @@ def smoke(
                 "reward": reward,
                 "stop_reason": result.get("stop_reason"),
                 "error": error,
+                "warning": result.get("warning"),
             }
         )
         log(f"smoke #{rec['index']}: {results[-1]}")
@@ -659,6 +663,8 @@ def smoke(
         "passed": passed,
         "total": len(results),
         "results": results,
+        # agent-reported problems that do not fail the smoke (e.g. no access to its model)
+        "warnings": [f"#{r['index']}: {r['warning']}" for r in results if r["warning"]],
         "ok": passed == len(results),
     }
 

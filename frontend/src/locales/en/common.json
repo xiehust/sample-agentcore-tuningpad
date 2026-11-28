@@ -577,7 +577,8 @@
     "platformVersion": "Platform",
     "platform_auto": "Runtime V2 where available",
     "platform_V1": "Runtime V1",
-    "platform_V2": "Runtime V2 (snapshot)"
+    "platform_V2": "Runtime V2 (snapshot)",
+    "smokeWarnings": "warnings"
   },
   "datasets": {
     "create": "New dataset",

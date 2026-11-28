@@ -50,6 +50,15 @@ def test_template_context_contains_config_and_toolkit_files(toolkit_repo, stub_t
     assert checks["errors"] == [] and checks["warnings"] == []
 
 
+def test_multi_harness_context_passes_the_contract_checks(toolkit_repo, stub_toolkit_build):
+    agent = {"id": "ag-mh", "source": "template", "template_id": "multi_harness", "config": {}}
+    ctx = svc.prepare_context(agent)
+    assert (ctx / "harness_agent" / "rollout.py").is_file()
+    cfg = json.loads((ctx / "tp_config.json").read_text())
+    assert cfg == {"tool_bonus_cap": 0.1, "tool_call_budget": 40.0, "harness_max_turns": 200.0}
+    assert svc.static_checks(ctx) == {"errors": [], "warnings": []}
+
+
 @pytest.fixture
 def own_template(tmp_path, monkeypatch):
     """A TuningPad-owned template (no toolkit example) added beside the real ones."""
@@ -250,8 +259,21 @@ def test_smoke_runs_http_sessions_with_the_bedrock_key(monkeypatch):
         "model_id": svc.SMOKE_MODEL,
         "api_key": "tok",
         "sampling_params": {"max_tokens": 1024},
+        # agents whose harness cannot use this endpoint (Claude Code) switch to Bedrock
+        "smoke": True,
     }
     assert sorted(client.stopped) == sorted(sids) and len(set(sids)) == 2 and client.closed
+
+
+def test_smoke_reports_agent_warnings_without_failing(monkeypatch):
+    from app.services import rollouts
+
+    client = FakeHttpClient({"q": {"reward": 0.0, "warning": "bedrock model access denied"}})
+    monkeypatch.setattr(rollouts, "http_client", lambda arn, tps: client)
+    monkeypatch.setattr(svc, "bedrock_openai", lambda region: ("https://br/openai/v1", "tok"))
+    out = svc.smoke("us-east-1", "arn:rt", [{"prompt": "q"}], lambda m: None)
+    assert out["ok"] and out["results"][0]["warning"] == "bedrock model access denied"
+    assert out["warnings"] == ["#0: bedrock model access denied"]
 
 
 def test_rollout_records_classify_agent_and_invoke_failures(monkeypatch):
