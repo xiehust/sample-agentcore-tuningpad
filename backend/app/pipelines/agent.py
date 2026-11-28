@@ -26,6 +26,7 @@ def load_agent(agent_id: str) -> dict[str, Any]:
             "config": dict(a.config or {}),
             "image_uri": a.image_uri,
             "status": a.status,
+            "contract": a.contract,
             "checks": dict(a.checks or {}),
         }
 
@@ -115,7 +116,11 @@ def stage_push(ctx: StageContext) -> None:
 
 
 def _built(target: str, status: str, error: str | None) -> None:
-    save_agent(target, status="ready" if status == "succeeded" else "failed")
+    # A build passed the v0.2 static checks; an imported image is verified by the smoke.
+    if status == "succeeded":
+        save_agent(target, status="ready", contract=svc.CONTRACT)
+    else:
+        save_agent(target, status="failed")
 
 
 register(
@@ -270,6 +275,7 @@ def stage_deploy(ctx: StageContext) -> None:
     agent = load_agent(rt["agent_id"])
     if not agent["image_uri"] or agent["status"] != "ready":
         raise AppError("agent.not_built", "build or import the agent image first")
+    svc.require_contract(agent["contract"], "agent")
     res = proj.require_region(rt["region"])
     network, suffix = runtime_network(rt)
     platform = svc.resolve_platform_version(
@@ -284,6 +290,7 @@ def stage_deploy(ctx: StageContext) -> None:
                 rt["id"],
                 status="deploying",
                 image_uri=agent["image_uri"],
+                contract=agent["contract"],
                 platform_version=platform,
                 **out,
             )
@@ -365,10 +372,7 @@ def stage_smoke(ctx: StageContext) -> None:
     if ctx.payload.get("skip_smoke"):
         ctx.log("smoke skipped by request")
         return
-    res = proj.require_region(rt["region"])
-    result = svc.smoke(
-        rt["region"], rt["runtime_arn"], res["bucket"], agent["id"], payloads, ctx.log
-    )
+    result = svc.smoke(rt["region"], rt["runtime_arn"], payloads, ctx.log)
     with session_scope() as s:
         r = s.get(AgentRuntime, rt["id"])
         if r:
@@ -376,7 +380,7 @@ def stage_smoke(ctx: StageContext) -> None:
     if not result["ok"]:
         raise AppError(
             "agent.smoke_failed",
-            f"{result['passed']}/{result['total']} smoke rollouts returned numeric rewards",
+            f"{result['passed']}/{result['total']} smoke rollouts returned a numeric reward",
             detail=result,
         )
 

@@ -46,8 +46,6 @@ _REQUIRED_FILES = (
     "examples/strands_officebench_agent/utils.py",
     "examples/strands_officebench_agent/tools.py",
     "examples/strands_officebench_agent/preprocess.py",
-    "patches/apply-megatron-bridge-cp-clamp.sh",
-    "patches/megatron-bridge-cp-chunk1-clamp.diff",
 )
 
 

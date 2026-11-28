@@ -2,7 +2,7 @@
 
 The platform host is arm64 and the image is ~25 GB of CUDA wheels, so the build
 runs in a privileged x86 CodeBuild project. Source = S3 zip of
-trainer_image/{Dockerfile,buildspec.yml} + the toolkit's git-tracked files.
+trainer_image/{Dockerfile,buildspec.yml,patches/} + the toolkit's git-tracked files.
 Images are keyed by (region, profile, toolkit revision).
 """
 
@@ -44,6 +44,8 @@ def package_source(dest: Path, *, expected_revision: str) -> Path:
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
             for name in ("Dockerfile", "buildspec.yml"):
                 zf.write(BUILD_DIR / name, name)
+            for f in sorted((BUILD_DIR / "patches").glob("*.diff")):
+                zf.write(f, f"patches/{f.name}")
             for f in sorted(tk.rglob("*")):
                 if f.is_file():
                     zf.write(f, f"toolkit/{f.relative_to(tk).as_posix()}")

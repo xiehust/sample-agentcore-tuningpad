@@ -1,6 +1,6 @@
 # TuningPad
 
-TuningPad is a no-code web console for agentic reinforcement learning on AWS. It trains agents built on [agentcore-rl-toolkit](https://github.com/xiehust/agentcore-rl-toolkit) on SageMaker HyperPod (EKS), using verl GRPO. Rollouts run on Bedrock AgentCore Runtime. The same cluster is also used to export checkpoints, serve models with vLLM, and evaluate them. The UI follows the V2 style of [sample-agentcore-launchpad](../sample-agentcore-launchpad).
+TuningPad is a no-code web console for agentic reinforcement learning on AWS. It trains agents built on [agentcore-rl-toolkit](https://github.com/xiehust/agentcore-rl-toolkit) (a fork that tracks [awslabs](https://github.com/awslabs/agentcore-rl-toolkit)) on SageMaker HyperPod (EKS), using verl GRPO. Rollouts run on Bedrock AgentCore Runtime. The same cluster is also used to export checkpoints, serve models with vLLM, and evaluate them. The UI follows the V2 style of [sample-agentcore-launchpad](../sample-agentcore-launchpad).
 
 ```
 Console (React) ─► FastAPI control plane (this host) ─► CloudFormation · SageMaker HyperPod · EKS · AgentCore · S3 · ECR · CodeBuild
@@ -17,7 +17,7 @@ Console (React) ─► FastAPI control plane (this host) ─► CloudFormation �
 | 2 | Clusters | Create a cluster with the official HyperPod EKS quick-setup stack (VPC, EKS, FSx, HyperPod with a CPU `system` node), or import an existing one. TuningPad then installs its components: access entry, IRSA, SGs, KubeRay, AWS LBC, FSx PVC and the guardian. P-family GPU instance groups are added or scaled per run, on-demand, through a training plan, or on Spot. |
 | 3 | Agents | Use a template (GSM8K Math, OfficeBench), upload a `.zip`, or point at an ECR image. TuningPad runs static contract checks, builds an arm64 image, probes `/ping` locally, pushes to ECR, deploys an AgentCore runtime (VPC mode in the cluster subnets; Runtime V2 snapshot platform where the region offers it, else V1) and smoke-tests it with Bedrock `gpt-oss-20b`. |
 | 4 | Datasets | Built-in GSM8K (7473 / 200 val / 1319 test) or OfficeBench (tasks and testbeds uploaded to your bucket), or upload JSONL/CSV/parquet. Data is converted to a `payload` parquet. |
-| 5 | Models | Checks gateway chat-template compatibility (Qwen3/3.5/3.6/Coder, Nemotron-3, GLM4-MoE, GPT-OSS). The resource planner picks FSDP or Megatron, full or LoRA, and TP/CP/EP. |
+| 5 | Models | Checks gateway chat-template compatibility (Qwen2.5/3/3.5/3.6/3.8/Coder, GPT-OSS). The resource planner picks FSDP or Megatron, full or LoRA, and TP/CP/EP. |
 | 6 | Training runs | A wizard with template presets and a cost estimate. The trainer image is built automatically by CodeBuild. Training runs as a RayJob (multi-node uses EFA), with live metrics and logs, auto-retry from the latest checkpoint, stop/resume, and run budget and deadline limits. |
 | 7 | Exports → Inference → Evaluations | Merge a checkpoint into HF safetensors on FSx/S3. Serve it with vLLM behind an internal NLB with an API key. Evaluate base vs. trained models through your agent. |
 | – | Resources & cost | Shows S3, ECR, runtimes, clusters and the guardian ledger, and can purge temporary prefixes. |
@@ -72,7 +72,14 @@ Configuration goes in `config/tuningpad.yaml` (see `config/tuningpad.example.yam
 
 The single source declaration is `backend/pyproject.toml`: Git URL
 `https://github.com/xiehust/agentcore-rl-toolkit.git` at full commit
-`7712ae73ce51d8076b8efa4d2e2a3b2b9aaa36d6` (toolkit 0.1.5).
+`4fd592c74682f315f412969f975c539c7070ece7`: awslabs main `a187900` plus the gateway
+`require_registered_sessions` guard (proposed upstream in
+[awslabs/agentcore-rl-toolkit#250](https://github.com/awslabs/agentcore-rl-toolkit/pull/250)).
+Toolkit 0.2 contract: agents use `AgentCoreRuntimeApp`, read `payload["_config"]` and
+return `{"reward": float}`. Agents and runtimes built for the 0.1 contract must be rebuilt
+and redeployed before they can train or be evaluated. The trainer image applies
+TuningPad's own patches from `trainer_image/patches/` (the megatron-bridge CP clamp); a
+patch that stops applying fails the image build.
 `backend/uv.lock` records that pin; from `backend/`, `uv sync --locked` verifies the
 locked installation. No sibling checkout is required or searched automatically;
 installation is not editable.
@@ -125,5 +132,5 @@ cluster_assets/     guardian.py, pinned AWS LBC IAM policy
 ## Security notes
 
 - The rollout gateway (tcp/18765) and vLLM (tcp/8000) are reachable only from the AgentCore security group inside the cluster VPC. The gateway only accepts sessions the trainer registered (`require_registered_sessions`). Traffic is plain HTTP inside the VPC.
-- Rollout results include the per-session gateway key. They live under `rollouts/` and `smoke/`, which have 14-day and 1-day S3 lifecycle rules.
+- Rollout and smoke results come back over AgentCore's HTTP `start/get` and are no longer written to S3. The `rollouts/` and `smoke/` prefixes (14-day and 1-day lifecycle rules) only hold results from toolkit 0.1 runs.
 - The platform principal gets EKS cluster-admin through an access entry. Pods use IRSA roles scoped to the platform bucket, AgentCore invoke, and (for the guardian) `UpdateCluster` on that one cluster.

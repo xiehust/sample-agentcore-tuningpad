@@ -5,7 +5,8 @@ FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 WORKDIR /app
 ENV UV_SYSTEM_PYTHON=1 UV_COMPILE_BYTECODE=1 UV_NO_PROGRESS=1 PYTHONUNBUFFERED=1 DOCKER_CONTAINER=1
 COPY dist/agentcore_rl_toolkit-*.whl /tmp/
-RUN uv pip install /tmp/agentcore_rl_toolkit-*.whl \
+# [server] = bedrock-agentcore, which AgentCoreRuntimeApp needs (toolkit v0.2 extras)
+RUN WHEEL="$(ls /tmp/agentcore_rl_toolkit-*.whl)" && uv pip install "${WHEEL}[server]" \
       "strands-agents[openai,otel]==1.18.0" "strands-agents-tools==0.2.16" \
       "aws-opentelemetry-distro==0.21.0" \
     && rm -f /tmp/*.whl

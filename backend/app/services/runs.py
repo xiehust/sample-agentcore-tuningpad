@@ -109,9 +109,7 @@ def render(
         },
     )
     env = rt.pod_env(
-        run_id=run["id"],
         region=cluster["region"],
-        bucket=bucket,
         runtime_arn=runtime_arn,
         multi_node=nodes > 1,
         spec=spec,

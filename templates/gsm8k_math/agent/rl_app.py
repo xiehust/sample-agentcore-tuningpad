@@ -1,7 +1,7 @@
 """GSM8K calculator agent (examples/strands_math_agent/rl_app.py) with the
 operator-editable knobs read from /app/tp_config.json, written by TuningPad at
-build time. Contract: `_rollout.{base_url, model_id, api_key, sampling_params}`
-in, `{"rewards": float}` out."""
+build time. Contract (toolkit v0.2): `_config.{base_url, model_id, api_key,
+sampling_params}` in, `{"reward": float}` out."""
 
 import json
 import logging
@@ -15,7 +15,7 @@ from strands.models.openai import OpenAIModel
 from strands.types.exceptions import MaxTokensReachedException
 from strands_tools import calculator
 
-from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,18 +25,18 @@ SYSTEM_PROMPT = CONFIG["system_prompt"]
 REWARD_METHOD = CONFIG.get("reward_method", "strict")
 FORMAT_SCORE = float(CONFIG.get("format_score", 0.0))
 
-app = AgentCoreRLApp()
+app = AgentCoreRuntimeApp()
 reward_fn = GSM8KReward()
 
 
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict, context):
-    rollout = payload["_rollout"]
+    config = payload["_config"]
     model = OpenAIModel(
         # The gateway keys trajectory capture off the api-key slot: always forward it.
-        client_args={"api_key": rollout.get("api_key") or "EMPTY", "base_url": rollout["base_url"]},
-        model_id=rollout["model_id"],
-        params=rollout.get("sampling_params", {}),
+        client_args={"api_key": config.get("api_key") or "EMPTY", "base_url": config["base_url"]},
+        model_id=config["model_id"],
+        params=config.get("sampling_params", {}),
     )
     agent = Agent(
         model=model,
@@ -51,14 +51,16 @@ def invoke_agent(payload: dict, context):
         # A turn hit max_tokens_per_turn: a wrong (over-long) answer, not an agent
         # failure. Scoring 0 keeps the captured turns trainable and keeps the
         # infra-failure rate (acr_failed) meaningful in training and evals.
-        return {"rewards": 0.0, "stop_reason": "max_tokens"}
+        return {"reward": 0.0, "stop_reason": "max_tokens"}
     content = response.message.get("content") or []
     text = "".join(block["text"] for block in content if "text" in block)
-    rewards = reward_fn(
-        response_text=text, ground_truth=request.answer, method=REWARD_METHOD,
+    reward = reward_fn(
+        response_text=text,
+        ground_truth=request.answer,
+        method=REWARD_METHOD,
         format_score=FORMAT_SCORE,
     )
-    return {"rewards": rewards}
+    return {"reward": float(reward)}
 
 
 if __name__ == "__main__":

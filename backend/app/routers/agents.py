@@ -39,6 +39,7 @@ def _runtime_view(r: AgentRuntime) -> dict[str, Any]:
         "runtime_arn": r.runtime_arn,
         "image_uri": r.image_uri,
         "platform_version": r.platform_version,
+        "contract": r.contract,
         "status": r.status,
         "last_smoke": r.last_smoke or {},
         # eval-only OTEL twin, if an eval with trace recording deployed one

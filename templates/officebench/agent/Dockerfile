@@ -14,7 +14,8 @@ RUN git clone https://github.com/zlwang-cs/OfficeBench.git /tmp/officebench \
     && cp -r /tmp/officebench/apps /apps && rm -rf /tmp/officebench
 RUN mkdir -p /testbed/data /testbed/calendar /testbed/emails
 COPY dist/agentcore_rl_toolkit-*.whl /tmp/
-RUN uv pip install /tmp/agentcore_rl_toolkit-*.whl \
+# [server] = bedrock-agentcore, which AgentCoreRuntimeApp needs (toolkit v0.2 extras)
+RUN WHEEL="$(ls /tmp/agentcore_rl_toolkit-*.whl)" && uv pip install "${WHEEL}[server]" \
       "strands-agents[openai,otel]==1.18.0" "strands-agents-tools==0.2.16" python-dotenv \
       "aws-opentelemetry-distro==0.21.0" \
       openpyxl python-docx PyMuPDF pdf2docx pytesseract icalendar Pillow pytz fire \

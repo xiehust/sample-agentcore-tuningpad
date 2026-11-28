@@ -55,8 +55,6 @@ def fixture_source(tmp_path, monkeypatch):
         "README.md",
         "uv.lock",
         "src/agentcore_rl_toolkit/__init__.py",
-        "patches/apply-megatron-bridge-cp-clamp.sh",
-        "patches/megatron-bridge-cp-chunk1-clamp.diff",
         "examples/strands_math_agent/models.py",
         "examples/strands_math_agent/reward.py",
         *[

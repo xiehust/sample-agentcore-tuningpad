@@ -3,7 +3,7 @@ name: {en: "OfficeBench (office automation)", zh-CN: "OfficeBench（办公自动
 description:
   en: "300 calendar / email / Excel / Word / PDF / OCR tasks with 20 tools; reward from the task's evaluation spec. Training recipe verified with Megatron LoRA on Qwen3.6-27B (8×H100)."
   zh-CN: "300 个日历、邮件、Excel、Word、PDF、OCR 任务，20 个工具；按任务的评测配置打分。训练配方已在 Qwen3.6-27B（8×H100）Megatron LoRA 上验证。"
-contract: verl
+contract: verl-v2
 verified: true
 toolkit_dir: examples/strands_officebench_agent
 toolkit_files: [rl_app.py, reward.py, models.py, utils.py, tools.py]

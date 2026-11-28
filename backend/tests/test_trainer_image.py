@@ -20,12 +20,17 @@ def test_trainer_zip_contains_only_tracked_inputs(toolkit_repo, tmp_path):
     f = toolkit_repo
     dest = trainer_image.package_source(tmp_path / "source.zip", expected_revision=f.revision)
     with zipfile.ZipFile(dest) as z:
+        patches = sorted((trainer_image.BUILD_DIR / "patches").glob("*.diff"))
+        assert {p.name for p in patches} == {"megatron-bridge-cp-chunk1-clamp.diff"}
         assert set(z.namelist()) == {
             "Dockerfile",
             "buildspec.yml",
+            *(f"patches/{p.name}" for p in patches),
             "toolkit/README-link.md",
             *(f"toolkit/{name}" for name in f.files),
         }
+        for p in patches:
+            assert z.read(f"patches/{p.name}") == p.read_bytes()
         for name, content in f.files.items():
             assert z.read(f"toolkit/{name}").decode() == content
         assert z.read("toolkit/README-link.md") == z.read("toolkit/README.md")
@@ -187,3 +192,19 @@ def test_source_stage_passes_recorded_sha_without_rewriting_it(toolkit_repo, mon
     assert calls == [("us-east-1", "b", f.revision), ("us-east-1", "role", "b/source.zip")]
     assert context == {"source": "b/source.zip"}
     assert trainer._load("ti-stage")["toolkit_sha"] == f.revision
+
+
+def test_dockerfile_applies_patches_and_asserts_the_session_guard():
+    """The agent loop swallows unknown kwargs: the image build must prove that the rendered
+    require_registered_sessions reaches the gateway, and fail if a patch stops applying."""
+    text = (trainer_image.BUILD_DIR / "Dockerfile").read_text()
+    assert "COPY patches/ /opt/tuningpad-patches/" in text
+    assert "patch -p0 --forward --batch" in text
+    assert "megatron-bridge-cp-chunk1-clamp.diff" in text
+    assert "'require_registered_sessions' in inspect.signature(f).parameters" in text
+    for target in (
+        "AgentCoreAgentLoop.__init__",
+        "get_or_start_gateway",
+        "RolloutGateway.__init__",
+    ):
+        assert target in text

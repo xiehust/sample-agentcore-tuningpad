@@ -6,13 +6,17 @@ Build:   assemble a docker context (template overlay / uploaded zip) + toolkit w
 Import:  validate an existing ECR image (arm64, ≤ 2 GB).
 Deploy:  create/update an AgentCore runtime (VPC mode in the cluster's private
          subnets with sg-acr; PUBLIC only for a standalone smoke runtime).
-Smoke:   RolloutClient → InvokeAgentRuntime against Bedrock's OpenAI-compatible
-         endpoint (short-lived token); pass = status_code 200 + numeric rewards.
+Smoke:   HTTP start/get sessions (services.rollouts) against Bedrock's OpenAI-compatible
+         endpoint (short-lived token); pass = a result with a finite numeric `reward`.
+
+Agent contract (agentcore-rl-toolkit v0.2, `CONTRACT`): `AgentCoreRuntimeApp` +
+`@app.entrypoint`, model settings from `payload["_config"]`, `{"reward": float}` out.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import socket
@@ -30,9 +34,26 @@ from ..core import aws
 from ..core.config import get_settings
 from ..core.errors import AppError
 from ..templates_lib import get_template, resolve_params, template_dir
-from . import toolkit_source
+from . import rollouts, toolkit_source
 
+# Recorded on agents built/imported for the v0.2 HTTP contract and on runtimes deployed
+# from them. Older rows ("verl" = v0.1 AgentCoreRLApp + S3 results) cannot be driven.
+CONTRACT = "verl-v2"
 ACR_IMAGE_LIMIT_BYTES = 2 * 1024**3
+
+
+def require_contract(contract: str | None, what: str = "agent runtime") -> None:
+    """Trainer and evals drive only v0.2 images: a v0.1 one would fail every rollout."""
+    if contract != CONTRACT:
+        raise AppError(
+            "agent.contract_outdated",
+            f"the {what} was built for an older agent contract ({contract or 'v0.1'}); "
+            "rebuild the agent and redeploy its runtime",
+            status=409,
+            detail={"contract": contract, "required": CONTRACT},
+        )
+
+
 SMOKE_MODEL = "openai.gpt-oss-20b-1:0"
 RUNTIME_NAME_RE = re.compile(r"[^a-zA-Z0-9_]")
 
@@ -137,19 +158,25 @@ def static_checks(ctx: Path) -> dict[str, Any]:
     sources = "\n".join(
         p.read_text(errors="ignore") for p in ctx.rglob("*.py") if "dist" not in p.parts
     )
-    if "AgentCoreRLApp" not in sources:
-        errors.append("no AgentCoreRLApp found: the entrypoint must use agentcore_rl_toolkit")
-    if "rollout_entrypoint" not in sources:
-        errors.append("no @app.rollout_entrypoint found")
-    if "_rollout" not in sources:
-        warnings.append("payload['_rollout'] is never read: base_url/model_id come from it")
+    if "AgentCoreRLApp" in sources or "rollout_entrypoint" in sources:
+        errors.append(
+            "uses the retired v0.1 contract (AgentCoreRLApp / @app.rollout_entrypoint): "
+            "switch to AgentCoreRuntimeApp + @app.entrypoint, read payload['_config'] and "
+            "return {'reward': float} (agentcore-rl-toolkit MIGRATION.md)"
+        )
+    if "AgentCoreRuntimeApp" not in sources:
+        errors.append("no AgentCoreRuntimeApp found: the entrypoint must use agentcore_rl_toolkit")
+    if "entrypoint" not in sources:
+        errors.append("no @app.entrypoint found")
+    if "_config" not in sources:
+        warnings.append("payload['_config'] is never read: base_url/model_id come from it")
     if "api_key" not in sources:
         warnings.append(
-            "_rollout.api_key is not forwarded to the model client; the gateway "
+            "_config.api_key is not forwarded to the model client; the gateway "
             "cannot attribute tokens and training will fail"
         )
-    if '"rewards"' not in sources and "'rewards'" not in sources:
-        warnings.append("no 'rewards' key returned; verl scores such rollouts 0")
+    if '"reward"' not in sources and "'reward'" not in sources:
+        warnings.append("no 'reward' key returned; the trainer fails such rollouts")
     dockerfile = (ctx / "Dockerfile").read_text() if (ctx / "Dockerfile").is_file() else ""
     if "8080" not in dockerfile:
         warnings.append("Dockerfile does not EXPOSE 8080 (the AgentCore HTTP contract port)")
@@ -558,14 +585,6 @@ def delete_runtime(region: str, runtime_id: str) -> None:
 # ---------------- smoke ----------------
 
 
-def rollout_client(**kwargs):
-    """Factory seam (tests patch this); RolloutClient creates its own boto3 clients."""
-    toolkit_source.validate_installation()
-    from agentcore_rl_toolkit import RolloutClient
-
-    return RolloutClient(**kwargs)
-
-
 def bedrock_openai(region: str) -> tuple[str, str]:
     from aws_bedrock_token_generator import provide_token
 
@@ -575,8 +594,6 @@ def bedrock_openai(region: str) -> tuple[str, str]:
 def smoke(
     region: str,
     runtime_arn: str,
-    bucket: str,
-    agent_id: str,
     payloads: list[dict[str, Any]],
     log,
     timeout_s: int = 600,
@@ -585,37 +602,43 @@ def smoke(
     if not payloads:
         raise AppError("agent.no_smoke_payloads", "no sample payloads to smoke-test with")
     base_url, token = bedrock_openai(region)
-    client = rollout_client(
-        agent_runtime_arn=runtime_arn,
-        s3_bucket=bucket,
-        exp_id=f"smoke/{agent_id}",
-        base_url=base_url,
-        model_id=model_id,
-        tps_limit=2,
-        sampling_params={"max_tokens": 1024},
-    )
-    results = []
-    futures = [
-        client.invoke(p, input_id=f"smoke{i}", api_key=token) for i, p in enumerate(payloads)
+    tasks = [
+        rollouts.with_config(
+            p,
+            base_url=base_url,
+            model_id=model_id,
+            api_key=token,
+            sampling_params={"max_tokens": 1024},
+        )
+        for p in payloads
     ]
-    for i, f in enumerate(futures):
-        try:
-            r = f.result(timeout=timeout_s)
-            rewards = r.get("rewards")
-            ok = r.get("status_code", 200) == 200 and _numeric_reward(rewards)
-            results.append(
-                {
-                    "index": i,
-                    "ok": ok,
-                    "status_code": r.get("status_code", 200),
-                    "rewards": rewards,
-                    "stop_reason": r.get("stop_reason"),
-                    "error": None if ok else (r.get("error") or "missing numeric rewards"),
-                }
-            )
-        except Exception as e:
-            results.append({"index": i, "ok": False, "error": f"{type(e).__name__}: {e}"})
-        log(f"smoke #{i}: {results[-1]}")
+    results = []
+
+    def on_result(rec: dict[str, Any]) -> None:
+        result = rec.get("result") or {}
+        reward = result.get("reward")
+        ok = rec["success"] and numeric_reward(reward)
+        error = None if ok else (rec.get("error") or "missing numeric reward")
+        results.append(
+            {
+                "index": rec["index"],
+                "ok": ok,
+                "reward": reward,
+                "stop_reason": result.get("stop_reason"),
+                "error": error,
+            }
+        )
+        log(f"smoke #{rec['index']}: {results[-1]}")
+
+    rollouts.run_batch(
+        runtime_arn,
+        tasks,
+        max_concurrent=len(tasks),
+        timeout_s=timeout_s,
+        tps_limit=2,
+        on_result=on_result,
+    )
+    results.sort(key=lambda r: r["index"])
     passed = sum(r["ok"] for r in results)
     return {
         "model_id": model_id,
@@ -626,11 +649,8 @@ def smoke(
     }
 
 
-def _numeric_reward(rewards: Any) -> bool:
-    if isinstance(rewards, bool):
-        return False
-    if isinstance(rewards, int | float):
-        return True
-    if isinstance(rewards, list) and rewards:
-        return all(isinstance(x, int | float) and not isinstance(x, bool) for x in rewards)
-    return False
+def numeric_reward(reward: Any) -> bool:
+    """A finite scalar: what the v0.2 trainer accepts as a rollout reward."""
+    return (
+        isinstance(reward, int | float) and not isinstance(reward, bool) and math.isfinite(reward)
+    )

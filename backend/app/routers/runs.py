@@ -15,6 +15,7 @@ from ..pipelines import cluster as pc
 from ..pipelines.run import load_run
 from ..planner import plan as make_plan
 from ..render.train import AGENT_LOOP_DEFAULTS, DEFAULT_PARAMS, TrainingMode, merge_params
+from ..services import agents as agents_svc
 from ..services import hyperpod as hp
 from ..services import pools
 from ..services import project as proj
@@ -84,6 +85,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
             raise AppError("run.bad_runtime", "pick an agent runtime deployed to a cluster")
         if rt.status != "ready":
             raise AppError("run.runtime_not_ready", "the agent runtime is not ready")
+        agents_svc.require_contract(rt.contract)
         cluster_id, region = rt.cluster_id, rt.region
         from ..models import Agent
 

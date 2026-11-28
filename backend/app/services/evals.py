@@ -1,14 +1,18 @@
 """Per-sample view of an eval: state, transcript and task input, redacted for the console.
 
-Rows come from `results.jsonl` (written by `pipelines/serving.py:stage_eval`). The toolkit
-keeps everything the agent returned; only an allowlist of fields leaves this module, and
-every string is scanned for credentials (the per-sample S3 artifacts carry the endpoint
-API key inside `_rollout`, and agents may echo secrets into their transcripts).
+Rows come from `results.jsonl` (written by `pipelines/serving.py:stage_eval` from
+`services.rollouts` records). They keep everything the agent returned; only an allowlist of
+fields leaves this module, and every string is scanned for credentials (agents may echo
+the endpoint API key from `_config`, or other secrets, into their transcripts).
+
+Rows written before the toolkit v0.2 contract carry `rewards`, `status_code` and the S3
+`result_key`; they are still read.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from pathlib import Path
@@ -33,35 +37,44 @@ _SECRET_VAL = re.compile(
     r"|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"  # AWS access key ids
     r"|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{16,}"
 )
-_HIDDEN_RESULT_KEYS = {"payload", "_rollout", "s3_bucket", "result_key", "input_id"}
+_HIDDEN_RESULT_KEYS = {
+    "payload",
+    "_config",
+    "_rollout",
+    "s3_bucket",
+    "result_key",
+    "input_id",
+}
 
 
 # ---------------- state (shared with services.serving.summarize_eval) ----------------
 
 
 def reward_of(result: dict[str, Any] | None) -> float | None:
-    r = (result or {}).get("rewards")
+    result = result or {}
+    r = result.get("reward", result.get("rewards"))  # v0.2 scalar, v0.1 rows: rewards
     if isinstance(r, list):
         r = r[-1] if r else None
-    if isinstance(r, int | float) and not isinstance(r, bool):
+    if isinstance(r, int | float) and not isinstance(r, bool) and math.isfinite(r):
         return float(r)
     return None
 
 
 def sample_state(item: dict[str, Any]) -> str:
-    """scored | truncated | acr_failed | invoke_failed. `success` only means the result file
-    was fetched: a 500 from the agent is still success=True, so look at the reward."""
+    """scored | truncated | acr_failed | invoke_failed. A result without a usable reward is
+    an agent failure; so is an agent that raised (`failure == "agent"`). v0.1 rows: a 500
+    from the agent was still success=True, so the reward decides there too."""
     result = item.get("result") or {}
     if "max_tokens" in str(result.get("stop_reason") or ""):
         return "truncated"  # turn budget exhausted: scored 0, not an infra failure
     if not item.get("success"):
-        return "invoke_failed"
+        return "acr_failed" if item.get("failure") == "agent" else "invoke_failed"
     return "scored" if reward_of(result) is not None else "acr_failed"
 
 
 def session_id_of(item: dict[str, Any]) -> str | None:
-    """runtimeSessionId of the sample: stored by stage_eval, else the file name of the
-    toolkit's result key `evals/<eval>/<input_id>/<session_id>.json`."""
+    """runtimeSessionId of the sample: stored by stage_eval, else (v0.1 rows) the file name
+    of the toolkit's result key `evals/<eval>/<input_id>/<session_id>.json`."""
     sid = (
         item.get("session_id") or Path(str((item.get("result") or {}).get("result_key") or "")).stem
     )
@@ -296,7 +309,7 @@ def sample_detail(eval_id: str, index: int) -> dict[str, Any]:
         k: redact(v)
         for k, v in result.items()
         if k not in _HIDDEN_RESULT_KEYS
-        and k not in {"messages", "traceback", "rewards", "status_code", "stop_reason"}
+        and k not in {"messages", "traceback", "reward", "rewards", "status_code", "stop_reason"}
         and isinstance(v, str | int | float | bool)
     }
     return {

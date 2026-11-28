@@ -80,6 +80,9 @@ class AgentRuntime(Base, TimestampMixin):
     image_uri: Mapped[str | None] = mapped_column(String(512))
     # requested before deploy, then the version AgentCore reports (V1 | V2)
     platform_version: Mapped[str | None] = mapped_column(String(8))
+    # agent contract of the deployed image (services.agents.CONTRACT); null = deployed
+    # before contracts were tracked on runtimes, i.e. a v0.1 image
+    contract: Mapped[str | None] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32), default="pending")
     last_smoke: Mapped[dict] = mapped_column(JSON, default=dict)
     # eval-only OTEL twin (same image + network, TP_OBSERVABILITY=1), deployed on demand by

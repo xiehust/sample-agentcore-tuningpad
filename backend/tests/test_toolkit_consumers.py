@@ -249,7 +249,7 @@ def test_import_consumers_check_metadata_without_source_resolution(
     # Stub the imported object, not validate_installation. The bad metadata path must
     # stop before either object is used, even when its module is already loaded.
     if consumer == "catalog":
-        from agentcore_rl_toolkit.rollout_gateway import response_schemas
+        from agentcore_rl_toolkit.rollout_gateway import response_templates
 
         class Registry(dict):
             def get(self, key):
@@ -257,7 +257,7 @@ def test_import_consumers_check_metadata_without_source_resolution(
                 return super().get(key)
 
         digest = hashlib.sha256(b"fixture").hexdigest()
-        monkeypatch.setattr(response_schemas, "_TEMPLATE_HASHES", Registry({digest: "qwen3"}))
+        monkeypatch.setattr(response_templates, "_TEMPLATE_HASHES", Registry({digest: "qwen3"}))
 
         def operation():
             return models.schema_for_template("fixture")
@@ -266,13 +266,17 @@ def test_import_consumers_check_metadata_without_source_resolution(
     else:
         import agentcore_rl_toolkit
 
+        from app.services import rollouts
+
         expected = object()
         monkeypatch.setattr(
-            agentcore_rl_toolkit, "RolloutClient", lambda **kw: calls.append(kw) or expected
+            agentcore_rl_toolkit,
+            "AgentCoreHttpClient",
+            lambda arn, **kw: calls.append(arn) or expected,
         )
 
         def operation():
-            return agents.rollout_client(region="fixture")
+            return rollouts.http_client("arn:fixture", 2)
 
     if valid:
         assert operation() == expected

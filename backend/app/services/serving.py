@@ -1,6 +1,6 @@
 """Export (checkpoint merge), inference (vLLM Deployment + internal NLB) and the
 k8s manifests behind them. Evaluation itself runs from the backend through
-RolloutClient → AgentCore runtime (VPC) → this endpoint."""
+services.rollouts (HTTP sessions) → AgentCore runtime (VPC) → this endpoint."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ..catalog import instances
 from ..render.train import FSX_MOUNT
 from . import kube
 
-VLLM_IMAGE = "vllm/vllm-openai:v0.24.0"  # same vLLM as the trainer stack (toolkit uv.lock)
+VLLM_IMAGE = "vllm/vllm-openai:v0.32.0"  # same vLLM as the trainer stack (toolkit uv.lock)
 VLLM_PORT = 8000
 
 

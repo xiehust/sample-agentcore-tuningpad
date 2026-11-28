@@ -54,8 +54,24 @@ def test_static_checks_catch_contract_violations(tmp_path):
     (tmp_path / "app.py").write_text("from bedrock_agentcore import BedrockAgentCoreApp\n")
     r = svc.static_checks(tmp_path)
     assert any("Dockerfile" in e for e in r["errors"])
-    assert any("AgentCoreRLApp" in e for e in r["errors"])
+    assert any("AgentCoreRuntimeApp" in e for e in r["errors"])
     assert any("api_key" in w for w in r["warnings"])
+
+
+def test_static_checks_reject_the_v01_contract(tmp_path):
+    (tmp_path / "Dockerfile").write_text("EXPOSE 8080\n")
+    (tmp_path / "rl_app.py").write_text(
+        "from agentcore_rl_toolkit import AgentCoreRLApp\n"
+        "app = AgentCoreRLApp()\n"
+        "@app.rollout_entrypoint\n"
+        "def f(payload, context):\n"
+        "    r = payload['_rollout']\n"
+        "    return {'rewards': 1.0, 'api_key': r['api_key']}\n"
+    )
+    r = svc.static_checks(tmp_path)
+    assert any("v0.1 contract" in e for e in r["errors"])
+    assert any("_config" in w for w in r["warnings"])
+    assert any("'reward'" in w for w in r["warnings"])
 
 
 def test_snapshot_unsafe_import_time_calls_are_flagged(tmp_path):
@@ -128,46 +144,107 @@ def test_network_config():
 
 
 @pytest.mark.parametrize(
-    "rewards,ok",
+    "reward,ok",
     [
         (1, True),
         (0.5, True),
-        ([0, 1.0], True),
+        ([0, 1.0], False),  # v0.2: a scalar only
+        (float("nan"), False),
         (None, False),
         ("1", False),
         (True, False),
-        ([], False),
     ],
 )
-def test_numeric_reward(rewards, ok):
-    assert svc._numeric_reward(rewards) is ok
+def test_numeric_reward(reward, ok):
+    assert svc.numeric_reward(reward) is ok
 
 
-def test_smoke_uses_api_key_override_and_smoke_prefix(monkeypatch):
-    captured = {}
+class FakeHttpClient:
+    """Stands in for AgentCoreHttpClient under the real AgentCoreHttpSession."""
 
-    class Fut:
-        def __init__(self, r):
-            self.r = r
+    runtime_arn = "arn:rt"
 
-        def result(self, timeout):
-            return self.r
+    def __init__(self, results):
+        self.results = results  # per payload["prompt"]: dict result or Exception
+        self.tasks, self.stopped, self.closed = [], [], False
 
-    class Client:
-        def __init__(self, **kw):
-            captured["init"] = kw
+    async def invoke(self, payload, *, session_id, invocation_id=None, background=False):
+        self.tasks.append((session_id, payload))
+        outcome = self.results[payload["prompt"]]
 
-        def invoke(self, payload, input_id, api_key):
-            captured.setdefault("keys", []).append(api_key)
-            return Fut({"status_code": 200, "rewards": 1.0})
+        class Handle:
+            async def result(self, timeout=None):
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return outcome
 
-    monkeypatch.setattr(svc, "rollout_client", lambda **kw: Client(**kw))
+        return Handle() if background else await Handle().result()
+
+    async def stop_session(self, session_id):
+        self.stopped.append(session_id)
+
+    async def aclose(self):
+        self.closed = True
+
+
+def test_smoke_runs_http_sessions_with_the_bedrock_key(monkeypatch):
+    from app.services import rollouts
+
+    client = FakeHttpClient({"q": {"reward": 1.0}, "bad": {"stop_reason": "end_turn"}})
+    monkeypatch.setattr(rollouts, "http_client", lambda arn, tps: client)
     monkeypatch.setattr(svc, "bedrock_openai", lambda region: ("https://br/openai/v1", "tok"))
-    out = svc.smoke("us-east-1", "arn:rt", "bucket", "ag-1", [{"prompt": "q"}], lambda m: None)
-    assert out["ok"] and out["passed"] == 1
-    assert captured["init"]["exp_id"] == "smoke/ag-1"
-    # RolloutClient overwrites payload['_rollout'] — the key must go through invoke(api_key=)
-    assert captured["keys"] == ["tok"]
+    out = svc.smoke("us-east-1", "arn:rt", [{"prompt": "q"}, {"prompt": "bad"}], lambda m: None)
+    assert out["passed"] == 1 and out["total"] == 2 and not out["ok"]
+    assert [r["reward"] for r in out["results"]] == [1.0, None]
+    assert out["results"][1]["error"] == "missing numeric reward"
+    sids = [sid for sid, _ in client.tasks]
+    cfg = client.tasks[0][1]["_config"]
+    # the model settings ride in _config; Bedrock's token is the model client's api key
+    assert cfg == {
+        "base_url": "https://br/openai/v1",
+        "model_id": svc.SMOKE_MODEL,
+        "api_key": "tok",
+        "sampling_params": {"max_tokens": 1024},
+    }
+    assert sorted(client.stopped) == sorted(sids) and len(set(sids)) == 2 and client.closed
+
+
+def test_rollout_records_classify_agent_and_invoke_failures(monkeypatch):
+    from agentcore_rl_toolkit.runtime import InvocationError
+
+    from app.services import rollouts
+
+    err = InvocationError("s", {"invocation_id": "i", "status": "completed", "error": "boom"})
+    client = FakeHttpClient({"ok": {"reward": 0.5}, "raised": err, "down": RuntimeError("503")})
+    monkeypatch.setattr(rollouts, "http_client", lambda arn, tps: client)
+    seen = []
+    recs = rollouts.run_batch(
+        "arn:rt",
+        [{"prompt": p} for p in ("ok", "raised", "down")],
+        on_result=seen.append,
+    )
+    assert [r["index"] for r in recs] == [0, 1, 2] and len(seen) == 3
+    assert recs[0]["success"] and recs[0]["result"] == {"reward": 0.5}
+    assert recs[1]["failure"] == "agent" and "boom" in recs[1]["error"]
+    assert recs[2]["failure"] == "invoke" and "503" in recs[2]["error"]
+    assert len(client.stopped) == 3  # every session is stopped, whatever the outcome
+
+
+def test_rollout_batch_stops_sessions_when_the_callback_raises(monkeypatch):
+    from app.services import rollouts
+
+    client = FakeHttpClient({"a": {"reward": 1.0}, "b": {"reward": 1.0}})
+    monkeypatch.setattr(rollouts, "http_client", lambda arn, tps: client)
+
+    class Cancelled(Exception):
+        pass
+
+    def on_result(rec):
+        raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        rollouts.run_batch("arn:rt", [{"prompt": "a"}, {"prompt": "b"}], on_result=on_result)
+    assert client.closed
 
 
 def test_parse_image_uri():
@@ -403,7 +480,7 @@ class _Ctx:
         raise AssertionError(f"never: {what}")
 
 
-def _seed_agent_runtime(rt_id="rt-local", runtime_id=None):
+def _seed_agent_runtime(rt_id="rt-local", runtime_id=None, contract="verl-v2"):
     from app.core.db import session_scope
     from app.models import Agent, AgentRuntime
 
@@ -416,6 +493,7 @@ def _seed_agent_runtime(rt_id="rt-local", runtime_id=None):
                 config={"region": "us-east-1"},
                 image_uri="111.dkr.ecr.us-east-1.amazonaws.com/a:1",
                 status="ready",
+                contract=contract,
                 checks={},
             )
         )
@@ -449,6 +527,25 @@ def test_stage_deploy_v2_waits_for_busy_runtime_and_records_version(stub_aws, mo
     upd = next(kw for n, kw in ctl.calls if n == "update_agent_runtime")
     assert upd["platformVersion"] == "V2"
     assert pa.load_runtime("rt-local")["platform_version"] == "V2"
+    from app.core.db import session_scope
+    from app.models import AgentRuntime
+
+    with session_scope() as s:
+        assert s.get(AgentRuntime, "rt-local").contract == "verl-v2"  # from the agent
+
+
+def test_stage_deploy_refuses_a_v01_agent(stub_aws):
+    _seed_agent_runtime(contract="verl")
+    stub_aws({})  # fails before any AWS call
+    with pytest.raises(AppError) as e:
+        pa.stage_deploy(_Ctx("rt-local", {}))
+    assert e.value.code == "agent.contract_outdated"
+
+
+def test_successful_build_or_import_records_the_v2_contract():
+    _seed_agent_runtime(contract="verl")
+    pa._built("ag-pv", "succeeded", None)
+    assert pa.load_agent("ag-pv")["contract"] == svc.CONTRACT
 
 
 def test_stage_deploy_keeps_stored_version_without_request(stub_aws, monkeypatch):
@@ -528,7 +625,13 @@ def _seed_vpc_runtime(image="img:1"):
         )
         s.add(
             Agent(
-                id="ag-1", name="ob", source="template", config={}, image_uri=image, status="ready"
+                id="ag-1",
+                name="ob",
+                source="template",
+                config={},
+                image_uri=image,
+                status="ready",
+                contract="verl-v2",
             )
         )
         s.flush()
@@ -543,6 +646,7 @@ def _seed_vpc_runtime(image="img:1"):
                 runtime_arn="arn:train",
                 image_uri=image,
                 platform_version="V2",
+                contract="verl-v2",
                 status="ready",
             )
         )
@@ -614,6 +718,19 @@ def test_observed_eval_needs_transaction_search(client, stub_aws, monkeypatch):
     assert r.status_code == 409 and r.json()["code"] == "eval.observability_off"
     assert r.json()["detail"] == {"region": "us-east-1"}
     assert client.get("/api/evals").json() == []  # nothing created
+
+
+def test_eval_refuses_a_runtime_on_the_v01_contract(client):
+    from app.core.db import session_scope
+    from app.models import AgentRuntime
+
+    _seed_vpc_runtime()
+    with session_scope() as s:
+        s.get(AgentRuntime, "rt-1").contract = None  # deployed before contracts were tracked
+    body = {"name": "e", "endpoint_id": "ep-x", "agent_runtime_id": "rt-1", "dataset_id": "ds-x"}
+    r = client.post("/api/evals", json=body)
+    assert r.status_code == 409 and r.json()["code"] == "agent.contract_outdated"
+    assert client.get("/api/evals").json() == []
 
 
 def test_deleting_runtime_deletes_its_obs_twin(client, stub_aws):

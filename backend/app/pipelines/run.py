@@ -34,9 +34,16 @@ GPU_NODE_FAULTS = re.compile(
     r"|fallen off the bus"
 )
 ATTEMPT_MARK = "[tuningpad] starting verl main_ppo"  # train script, once per attempt
-# The toolkit's dropped-rollout guard: an agent/environment bug drops most rollouts. A
-# checkpoint resume only replays it, burning `agentcore_drop_guard_steps` GPU steps per retry.
-NON_RETRYABLE = re.compile(r"RolloutFailureGuardError")
+# Failed-rollout guard (sync runs). Toolkit v0.2 drops a rollout that failed before any
+# model turn (training/rollout_failure/total_missing_sessions) and trains one that failed
+# later at reward 0 (agent_loop/acr_failed/mean, per session), with no guard of its own.
+# A deterministic agent/environment bug then burns GPU hours on almost no signal, and a
+# checkpoint resume only replays it: stop the run, without retry, once failures exceed
+# MAX_FAILED_FRACTION of the nominal rollouts for FAILURE_GUARD_STEPS consecutive steps.
+MISSING_SESSIONS = "training/rollout_failure/total_missing_sessions"
+ACR_FAILED = "agent_loop/acr_failed/mean"
+MAX_FAILED_FRACTION = 0.5
+FAILURE_GUARD_STEPS = 3
 
 
 def load_run(run_id: str) -> dict[str, Any]:
@@ -383,14 +390,47 @@ def _replace_faulty_nodes(
         ctx.log(f"GPU node fault on {node}: {msg}")
 
 
-def _non_retryable(run: dict[str, Any], region: str, bucket: str) -> str | None:
-    """The latest attempt's log line that makes a retry pointless, if any."""
-    offset = int((run["progress"] or {}).get("log_offset", 0))
-    tail, _ = svc.read_log(region, bucket, run["id"], max(0, offset - 256 * 1024))
-    for line in tail.rsplit(ATTEMPT_MARK, 1)[-1].splitlines():
-        if NON_RETRYABLE.search(line):
-            return re.sub(r"\x1b\[[0-9;]*m", "", line).strip()[:500]
-    return None
+def failed_fraction(metrics: dict[str, float], nominal: int) -> float | None:
+    """Share of a step's nominal rollouts that failed: dropped ones plus, of the rest, the
+    sessions the agent failed (trained at 0). None when the step reported neither."""
+    if MISSING_SESSIONS not in metrics and ACR_FAILED not in metrics:
+        return None
+    dropped = min(1.0, max(0.0, metrics.get(MISSING_SESSIONS, 0.0) / max(nominal, 1)))
+    failed = min(1.0, max(0.0, metrics.get(ACR_FAILED, 0.0)))
+    return dropped + (1 - dropped) * failed
+
+
+def rollout_failure_guard(run: dict[str, Any]) -> str | None:
+    """Why the run must stop, once the last FAILURE_GUARD_STEPS consecutive steps each
+    failed more than MAX_FAILED_FRACTION of their rollouts; else None."""
+    mode, params, _ = svc.validate_training_contract(run["spec"], run["compute"])
+    if mode != "sync":  # async drops and resamples whole groups: counts are not comparable
+        return None
+    nominal = int(params["train_batch_size"]) * int(params["rollout_n"])
+    with session_scope() as s:
+        rows = (
+            s.query(RunMetric.step, RunMetric.key, RunMetric.value)
+            .filter(
+                RunMetric.run_id == run["id"], RunMetric.key.in_([MISSING_SESSIONS, ACR_FAILED])
+            )
+            .all()
+        )
+    by_step: dict[int, dict[str, float]] = {}
+    for step, key, value in rows:
+        by_step.setdefault(step, {})[key] = value
+    steps = sorted(by_step)[-FAILURE_GUARD_STEPS:]
+    if len(steps) < FAILURE_GUARD_STEPS or steps[-1] - steps[0] != FAILURE_GUARD_STEPS - 1:
+        return None
+    fractions = [failed_fraction(by_step[st], nominal) or 0.0 for st in steps]
+    if min(fractions) <= MAX_FAILED_FRACTION:
+        return None
+    last = by_step[steps[-1]]
+    return (
+        f"steps {steps[0]}-{steps[-1]} each lost more than {MAX_FAILED_FRACTION:.0%} of "
+        f"{nominal} rollouts (failed fraction {', '.join(f'{f:.2f}' for f in fractions)}; "
+        f"step {steps[-1]}: {int(last.get(MISSING_SESSIONS, 0))} dropped, "
+        f"acr_failed {last.get(ACR_FAILED, 0.0):.2f})"
+    )
 
 
 def stage_monitor(ctx: StageContext) -> None:
@@ -418,18 +458,18 @@ def stage_monitor(ctx: StageContext) -> None:
             if budget and cost.get("est_cost_usd", 0) >= float(budget):
                 kube.delete(region, eks, svc.RAYJOB_API, "RayJob", name)
                 raise AppError("run.budget_exceeded", f"run budget ${budget} reached; stopped")
+            if name and (blocker := rollout_failure_guard(run)):
+                kube.delete(region, eks, svc.RAYJOB_API, "RayJob", name)
+                raise AppError(
+                    "run.rollout_failure_guard",
+                    f"RayJob {name} stopped: most rollouts are failing; not retried: {blocker}",
+                )
             job_status = (st or {}).get("job")
             deploy = (st or {}).get("deployment")
             if job_status == "SUCCEEDED" or (deploy == "Complete" and job_status != "FAILED"):
                 save_run(run["id"], status="succeeded")
                 break
             if job_status in ("FAILED", "STOPPED") or deploy == "Failed" or (st is None and name):
-                if blocker := _non_retryable(run, region, bucket):
-                    raise AppError(
-                        "run.rollout_failure_guard",
-                        f"RayJob {name} stopped by the dropped-rollout guard; not retried: "
-                        f"{blocker}",
-                    )
                 if run["retries"] >= max_retries:
                     raise AppError(
                         "run.failed",

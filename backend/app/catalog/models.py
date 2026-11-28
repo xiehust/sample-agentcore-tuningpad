@@ -1,17 +1,17 @@
 """Model catalog + rollout-gateway compatibility check.
 
 The gateway parses tool calls only for chat templates whose sha256 is in the
-toolkit's registry (`rollout_gateway.response_schemas._TEMPLATE_HASHES`). We
+toolkit's registry (`rollout_gateway.response_templates.resolve_template_name`). We
 fetch the template the way transformers loads it (chat_template.jinja wins over
 tokenizer_config.json) plus config.json and parameter counts — never weights.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 from dataclasses import asdict, dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from ..core.errors import AppError
@@ -21,7 +21,6 @@ from ..services import toolkit_source
 VLLM_PARSERS: dict[str, dict[str, str | None]] = {
     "qwen3": {"tool_call_parser": "hermes", "reasoning_parser": "qwen3"},
     "qwen3_5": {"tool_call_parser": "qwen3_coder", "reasoning_parser": "qwen3"},
-    "glm4moe": {"tool_call_parser": "glm45", "reasoning_parser": "glm45"},
     "gptoss": {"tool_call_parser": "openai", "reasoning_parser": "openai_gptoss"},
 }
 
@@ -35,7 +34,6 @@ PRESETS: list[dict[str, Any]] = [
     {"id": "Qwen/Qwen3.6-27B", "verified": "verl Megatron LoRA TP4 CP2 (officebench, migration)"},
     {"id": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "verified": "verl Megatron LoRA (swe, migration)"},
     {"id": "openai/gpt-oss-20b", "verified": None},
-    {"id": "zai-org/GLM-4.5-Air", "verified": None},
 ]
 
 
@@ -112,9 +110,10 @@ def schema_for_template(template: str | None) -> str | None:
     if not template:
         return None
     toolkit_source.validate_installation()
-    from agentcore_rl_toolkit.rollout_gateway.response_schemas import _TEMPLATE_HASHES
+    from agentcore_rl_toolkit.rollout_gateway.response_templates import resolve_template_name
 
-    return _TEMPLATE_HASHES.get(hashlib.sha256(template.encode("utf-8")).hexdigest())
+    # The resolver hashes `tokenizer.chat_template`; no tokenizer (or transformers) needed.
+    return resolve_template_name(SimpleNamespace(chat_template=template))
 
 
 def check_model(model_id: str, *, hf_token: str | None = None, refresh: bool = False) -> ModelCheck:
@@ -169,7 +168,7 @@ def check_model(model_id: str, *, hf_token: str | None = None, refresh: bool = F
     elif reason is None and schema is None:
         reason = (
             "chat template is not in the rollout gateway registry "
-            "(supported: Qwen2.5/Qwen3/Qwen3.5/Qwen3.6/Qwen3-Coder/Nemotron-3, GLM4-MoE, GPT-OSS)"
+            "(supported: Qwen2.5/Qwen3/Qwen3.5/Qwen3.6/Qwen3.8/Qwen3-Coder, GPT-OSS)"
         )
     compatible = reason is None
     is_moe, experts, per_tok = _moe_info(cfg)

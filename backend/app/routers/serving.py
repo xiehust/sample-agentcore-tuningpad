@@ -149,15 +149,18 @@ class EvalBody(BaseModel):
 
 @evals.post("")
 def create_eval(body: EvalBody):
+    from ..models import AgentRuntime
+    from ..services import agents as agents_svc
+
+    with session_scope() as s:
+        rt = s.get(AgentRuntime, body.agent_runtime_id)
+        if not rt:
+            raise NotFound("runtime.not_found", "agent runtime not found")
+        region, contract = rt.region, rt.contract
+    agents_svc.require_contract(contract)
     if body.observe:
-        from ..models import AgentRuntime
         from ..services import observability as obs
 
-        with session_scope() as s:
-            rt = s.get(AgentRuntime, body.agent_runtime_id)
-            if not rt:
-                raise NotFound("runtime.not_found", "agent runtime not found")
-            region = rt.region
         # fail before creating the eval: the console asks to enable it (account-level)
         if obs.transaction_search_status(region)["transaction_search"] == "off":
             raise AppError(

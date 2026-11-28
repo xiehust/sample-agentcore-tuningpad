@@ -207,7 +207,7 @@ def stage_eval(ctx: StageContext) -> None:
                 "eval.runtime",
                 "pick a ready agent runtime deployed to the endpoint's cluster (VPC)",
             )
-        runtime_arn = rt.runtime_arn
+        runtime_arn, contract = rt.runtime_arn, rt.contract
         if ev.get("observe"):
             runtime_arn = ev.get("obs_runtime_arn") or ""
             if not runtime_arn:
@@ -216,6 +216,9 @@ def stage_eval(ctx: StageContext) -> None:
 
         agent = s.get(Agent, rt.agent_id)
         template_id = agent.template_id if agent else None
+    from ..services.agents import require_contract
+
+    require_contract(contract)
     template_loop = None
     if template_id:
         from ..templates_lib import get_template
@@ -232,40 +235,40 @@ def stage_eval(ctx: StageContext) -> None:
     key = svc.read_api_key(c["region"], c["eks_name"], ep["id"])
     payloads = _payloads(ev["dataset_id"], ev["split"], ev["limit"])
     _save(Eval, ev["id"], status="running", started_at=utcnow(), ended_at=None)
-    from ..services import evals as esvc
-    from ..services.agents import rollout_client
+    from ..services import rollouts
 
-    client = rollout_client(
-        agent_runtime_arn=runtime_arn,
-        s3_bucket=bucket,
-        exp_id=f"evals/{ev['id']}",
-        base_url=ep["url"],
-        model_id=ep["served_model_name"],
-        api_key=key,
-        tps_limit=8,
-        sampling_params=sampling,
-    )
+    tasks = [
+        rollouts.with_config(
+            p,
+            base_url=ep["url"],
+            model_id=ep["served_model_name"],
+            api_key=key,
+            sampling_params=sampling,
+        )
+        for p in payloads
+    ]
     items: list[dict[str, Any]] = []
     out_path = Path(dsvc.local_dir(ev["id"])) / "results.jsonl"
     with out_path.open("w") as f:
-        for it in client.run_batch(
-            payloads, max_concurrent_sessions=32, timeout=float(ctx.payload.get("timeout_s", 1800))
-        ):
+
+        def on_result(rec: dict[str, Any]) -> None:
             ctx.check_cancel()
-            rec = {
-                "index": it.index,
-                "success": it.success,
-                "result": {k: v for k, v in (it.result or {}).items() if k != "payload"},
-                "error": it.error,
-                "elapsed": getattr(it, "elapsed", None),
-            }
-            rec["session_id"] = esvc.session_id_of(rec)  # joins the sample to its spans
             items.append(rec)
             f.write(json.dumps(rec, default=str) + "\n")
+            f.flush()
             if len(items) % 10 == 0:
                 summ = svc.summarize_eval(items)
                 ctx.detail(f"{len(items)}/{len(payloads)} · mean {summ['mean_reward']}")
                 _save(Eval, ev["id"], summary=summ)
+
+        rollouts.run_batch(
+            runtime_arn,
+            tasks,
+            max_concurrent=32,
+            timeout_s=float(ctx.payload.get("timeout_s", 1800)),
+            tps_limit=8,
+            on_result=on_result,
+        )
     summary = svc.summarize_eval(items)
     aws.client("s3", c["region"]).upload_file(
         str(out_path), bucket, f"evals/{ev['id']}/results.jsonl"

@@ -140,12 +140,10 @@ def toolkit_repo(tmp_path, monkeypatch, toolkit_installation):
     root = tmp_path / "fixture-toolkit"
     root.mkdir()
     files = {
-        "pyproject.toml": '[project]\nname = "agentcore-rl-toolkit"\nversion = "0.1.5"\n',
+        "pyproject.toml": '[project]\nname = "agentcore-rl-toolkit"\nversion = "0.2.0"\n',
         "README.md": "fixture source\n",
         "uv.lock": "fixture lock\n",
         "src/agentcore_rl_toolkit/__init__.py": "# fixture package\n",
-        "patches/apply-megatron-bridge-cp-clamp.sh": "# fixture patch script\n",
-        "patches/megatron-bridge-cp-chunk1-clamp.diff": "fixture patch\n",
         ".gitignore": "dist/\n__pycache__/\nignored*\n",
         "examples/strands_officebench_agent/preprocess.py": (
             "from pathlib import Path\n"
@@ -212,7 +210,7 @@ def stub_toolkit_build(monkeypatch):
         calls.append((args, root))
         dist = Path(args[args.index("-o") + 1])
         assert dist.is_absolute()
-        wheel = dist / "agentcore_rl_toolkit-0.1.5-py3-none-any.whl"
+        wheel = dist / "agentcore_rl_toolkit-0.2.0-py3-none-any.whl"
         wheel.write_bytes((root / "README.md").read_bytes())
         (root / "build-residue").write_text("private build output")
         return subprocess.CompletedProcess(args, 0, "", "")

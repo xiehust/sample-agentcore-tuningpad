@@ -22,13 +22,11 @@ KEY_METRICS = [
     "actor/entropy",
     "actor/grad_norm",
     "response_length/mean",
+    # Failed training rollouts (pipelines/run.py guards on both): dropped before any model
+    # turn, and the per-session share the agent failed after one (trained at reward 0).
     "training/rollout_failure/total_missing_sessions",
+    "agent_loop/acr_failed/mean",
     "val-aux/unknown/acr_failed/mean@1",
-    # Toolkit RolloutFailureGuardMixin (agentcore_sync, training rollouts only): dropped
-    # rollouts are total_missing_sessions; these count the ones retried / kept at reward 0.
-    "training/rollout_failure/total_transient_retry",
-    "training/rollout_failure/total_model_train",
-    "training/rollout_failure/drop_fraction",
     "batching/total_real_rows",
     "critic/advantages/zero_mean",
     "timing_s/step",

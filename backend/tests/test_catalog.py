@@ -157,9 +157,9 @@ def _fake_hf(monkeypatch, tmp_path, files: dict[str, str], total=2_000_000_000):
 def test_check_model_compatible_via_registry(monkeypatch, tmp_path, toolkit_installation):
     template = "{% for m in messages %}{{ m.content }}{% endfor %}"
     digest = hashlib.sha256(template.encode()).hexdigest()
-    from agentcore_rl_toolkit.rollout_gateway import response_schemas
+    from agentcore_rl_toolkit.rollout_gateway import response_templates
 
-    monkeypatch.setitem(response_schemas._TEMPLATE_HASHES, digest, "qwen3_5")
+    monkeypatch.setitem(response_templates._TEMPLATE_HASHES, digest, "qwen3_5")
     cfg = {
         "architectures": ["Qwen3_5ForConditionalGeneration"],
         "text_config": {"max_position_embeddings": 262144},
@@ -208,10 +208,10 @@ def test_check_model_incompatible_and_moe(monkeypatch, tmp_path, toolkit_install
 
 def _registered_template(monkeypatch) -> str:
     template = "{% for m in messages %}{{ m.content }}{% endfor %}"
-    from agentcore_rl_toolkit.rollout_gateway import response_schemas
+    from agentcore_rl_toolkit.rollout_gateway import response_templates
 
     digest = hashlib.sha256(template.encode()).hexdigest()
-    monkeypatch.setitem(response_schemas._TEMPLATE_HASHES, digest, "qwen3_5")
+    monkeypatch.setitem(response_templates._TEMPLATE_HASHES, digest, "qwen3_5")
     return template
 
 

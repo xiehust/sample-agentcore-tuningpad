@@ -314,7 +314,7 @@ function AgentDetail({ id }: { id: string }) {
                 render: (r) =>
                   r.last_smoke.total ? (
                     <Tag tone={r.last_smoke.ok ? "green" : "red"}>
-                      {r.last_smoke.passed}/{r.last_smoke.total} · rewards {(r.last_smoke.results ?? []).map((x) => JSON.stringify(x.rewards ?? "✕")).join(", ")}
+                      {r.last_smoke.passed}/{r.last_smoke.total} · reward {(r.last_smoke.results ?? []).map((x) => JSON.stringify(x.reward ?? x.rewards ?? "✕")).join(", ")}
                     </Tag>
                   ) : "—",
               },

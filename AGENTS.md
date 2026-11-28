@@ -51,6 +51,7 @@ Backend
 - Pipeline stages (`pipelines/*`, registered with `jobs.engine.register`) must be idempotent: inspect real AWS/K8s state before acting, so a restarted backend can re-run the first unfinished stage. Persist data for later stages in `ctx.context`.
 - Keep routers thin and put logic in `services/`.
 - Toolkit consumers use `services/toolkit_source.py`: inspect is read-only; resolve fetches only on actual cold-cache use into `<data_dir>/cache/toolkit/<full_sha>`. This source cache is separate from uv's install/build cache; `uv build` may still need network. Build/import helpers from tracked private copies, not the shared source. Optional `toolkit_path` accepts only a clean checkout of the same repository and SHA; dirty trees/editable installs fail without fallback. This migration never automatically updates existing cloud images/runtimes; later user operations may invoke the existing build flow.
+- The pinned toolkit is the `xiehust` fork kept as awslabs main plus the `require_registered_sessions` guard (awslabs PR #250); v0.2 agent contract: `AgentCoreRuntimeApp`, `_config`, scalar `reward`. Once #250 merges, pin awslabs instead. TuningPad-only fixes live in `trainer_image/patches/` and are applied with `patch --forward` at image build; when bumping the SHA, drop any patch upstream now contains (the build fails otherwise).
 
 Tests
 - `tests/conftest.py` isolates every test: temp data dir, SQLite, and AWS/K8s factories that raise on use. Stub clients explicitly (`StubClient`). Tests must never touch real AWS or Kubernetes.
@@ -66,4 +67,3 @@ Frontend
 - This tool provisions billable GPU capacity. Do not run anything against a real AWS account (start.py with real credentials, CloudFormation, HyperPod scale-up, CodeBuild) unless the user asks for it. Keep the cost guardrails intact: guardian CronJob, `activeDeadlineSeconds` on RayJobs, explicit cost confirmation before any GPU scale-up.
 - Don't weaken network/auth boundaries: the loopback-only default without `TUNINGPAD_PASSWORD`, gateway (18765) and vLLM (8000) reachable only from the AgentCore SG, `require_registered_sessions`, and IRSA scoping.
 - Never commit `config/tuningpad.yaml`, `data/` or `.run/`.
-

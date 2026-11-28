@@ -102,7 +102,6 @@ def test_megatron_matches_verified_officebench_recipe():
         "actor_rollout_ref.actor.megatron.tensor_model_parallel_size": "4",
         "actor_rollout_ref.actor.megatron.context_parallel_size": "2",
         "actor_rollout_ref.actor.megatron.use_mbridge": "true",
-        "actor_rollout_ref.actor.megatron.grad_offload": "true",
         "actor_rollout_ref.actor.megatron.optimizer_offload": "true",
         "actor_rollout_ref.model.lora.rank": "64",
         "actor_rollout_ref.model.lora.alpha": "128",
@@ -201,19 +200,29 @@ def test_agent_loop_yaml_forces_registered_sessions():
     assert loop["require_registered_sessions"] is True
     assert loop["gateway_port"] == 18765
     assert loop["max_tokens_per_turn"] == 8192 and loop["history_mode"] == "linear"
-    assert loop["agent_runtime_arn"] == "${oc.env:AGENT_RUNTIME_ARN}"
+    # toolkit v0.2: the runtime is driven through an HTTP rollout session backend
+    assert loop["rollout_session_backend"] == {
+        "backend": "agentcore_rl_toolkit.rollout_session.agentcore_http_session"
+        ".AgentCoreHttpSession",
+        "agentcore_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
+    }
     assert "gateway_public_host" not in loop  # Ray node IP = VPC pod IP
 
 
-def test_agent_loop_yaml_passes_failure_policy_from_template():
-    keys = ("drop_agent_errors", "max_rollout_retries", "timeout_policy")
-    loop = yaml.safe_load(rt.agent_loop_yaml({"max_tokens_per_turn": 8}, rt.merge_params({})))[0]
-    assert not set(keys) & set(loop)  # unset: the toolkit's own defaults apply
-    policy = {"drop_agent_errors": False, "max_rollout_retries": 0, "timeout_policy": "penalize"}
-    loop = yaml.safe_load(
-        rt.agent_loop_yaml({"max_tokens_per_turn": 8, **policy}, rt.merge_params({}))
-    )[0]
-    assert {k: loop[k] for k in keys} == policy
+def test_agent_loop_yaml_drops_v01_and_fork_only_kwargs():
+    """Upstream's loop swallows unknown kwargs: never render ones it would ignore."""
+    stale = {
+        "agent_runtime_arn",
+        "s3_bucket",
+        "exp_id",
+        "drop_agent_errors",
+        "max_rollout_retries",
+        "timeout_policy",
+    }
+    template = {"max_tokens_per_turn": 8, "drop_agent_errors": False, "rollout_concurrency": 64}
+    loop = yaml.safe_load(rt.agent_loop_yaml(template, rt.merge_params({})))[0]
+    assert not stale & set(loop)
+    assert loop["rollout_concurrency"] == 64  # template may cap job-wide concurrency
 
 
 def test_train_script_quotes_and_stages_data():
@@ -230,7 +239,8 @@ def test_train_script_quotes_and_stages_data():
     )
     assert "aws s3 cp --only-show-errors s3://b/datasets/d/train.parquet" in s
     assert "'data.train_files=['\"'\"'/x'\"'\"']'" in s  # shlex-quoted
-    assert "apply-megatron-bridge-cp-clamp.sh" in s
+    # the megatron-bridge CP clamp is applied when the trainer image is built
+    assert "apply-megatron-bridge-cp-clamp.sh" not in s and "patch" not in s
     assert "s3://b/runs/run-1/logs/train.log" in s
     assert "python3 -m verl.trainer.main_ppo \\\n    --config-name ppo_megatron_trainer \\" in s
     fsdp = rt.train_script(
@@ -279,22 +289,13 @@ def test_ckpt_index_lists_only_steps_with_an_actor_dir(tmp_path):
 
 def test_rayjob_single_and_multi_node():
     spec = CATALOG["p5.48xlarge"]
-    env = rt.pod_env(
-        run_id="r", region="us-east-1", bucket="b", runtime_arn="arn", multi_node=True, spec=spec
-    )
+    env = rt.pod_env(region="us-east-1", runtime_arn="arn", multi_node=True, spec=spec)
     names = {e["name"] for e in env}
-    assert {
-        "AGENT_RUNTIME_ARN",
-        "ACR_S3_BUCKET",
-        "EXP_ID",
-        "VERL_USE_EXTERNAL_MODULES",
-        "FI_PROVIDER",
-    } <= names
+    assert {"AGENT_RUNTIME_ARN", "VERL_USE_EXTERNAL_MODULES", "FI_PROVIDER"} <= names
+    assert not {"ACR_S3_BUCKET", "EXP_ID"} & names  # v0.2 rollouts no longer use S3
     envd = {e["name"]: e["value"] for e in env}
     assert envd["NCCL_DEBUG"] == "INFO" and envd["NCCL_DEBUG_SUBSYS"] == "INIT,NET"
-    single = rt.pod_env(
-        run_id="r", region="us-east-1", bucket="b", runtime_arn="arn", multi_node=False, spec=spec
-    )
+    single = rt.pod_env(region="us-east-1", runtime_arn="arn", multi_node=False, spec=spec)
     assert {e["name"]: e["value"] for e in single}["NCCL_DEBUG"] == "WARN"
     one = rt.rayjob(
         run_id="r",
@@ -393,6 +394,7 @@ def run_env(monkeypatch):
                 cluster_id="cl-1",
                 region="us-east-1",
                 runtime_arn="arn:rt",
+                contract="verl-v2",
                 status="ready",
             )
         )
@@ -557,30 +559,80 @@ def test_run_budget_stop(run_env, monkeypatch):
 def test_rollout_failure_guard_fails_the_run_without_retry(run_env, monkeypatch):
     from app.pipelines import run as pr
 
-    run_env["states"].append({"job": "FAILED", "deployment": "Failed", "message": "x"})
-    log = (
-        "old attempt: RolloutFailureGuardError from a previous attempt\n"
-        f"{pr.ATTEMPT_MARK}\n"
-        "step:3 - critic/score/mean:0.1 - training/rollout_failure/drop_fraction:0.75\n"
-        "\x1b[36m(TaskRunnerV1 pid=5)\x1b[0m agentcore_rl_toolkit.backends.verl.trainer_mixins."
-        "rollout_failure_guard.RolloutFailureGuardError: dropped 75% of rollouts\n"
+    run_env["states"].extend([{"job": "RUNNING", "deployment": "Running"}] * 5)
+    # 32 prompts x 8 samples = 256 nominal rollouts; 200 dropped per step
+    log = "".join(
+        f"step:{i} - critic/score/mean:0.1 - training/rollout_failure/total_missing_sessions:200\n"
+        for i in (1, 2, 3)
     )
     monkeypatch.setattr(pr.svc, "read_log", lambda region, bucket, rid, off, **k: (log, off))
     job = _wait(eng.get_engine().start("run.train", "run-1", {}))
     assert job.status == "failed" and job.error_code == "run.rollout_failure_guard"
-    assert "dropped 75% of rollouts" in job.error and "\x1b" not in job.error
+    assert "steps 1-3" in job.error and "200 dropped" in job.error
     names = [m["metadata"]["name"] for m in run_env["applied"] if m["kind"] == "RayJob"]
     assert names == ["run-1-a0"]  # no checkpoint resume: it would only replay the bug
+    assert run_env["deleted"] == ["run-1-a0"]  # stopped right away, not left burning GPU
     with session_scope() as s:
         assert s.get(Run, "run-1").retries == 0
 
 
-def test_guard_line_of_an_older_attempt_does_not_block_retry(monkeypatch):
+def test_failed_fraction_combines_dropped_and_agent_failed():
     from app.pipelines import run as pr
 
-    log = f"RolloutFailureGuardError: x\n{pr.ATTEMPT_MARK}\nIndexError: oops\n"
-    monkeypatch.setattr(pr.svc, "read_log", lambda region, bucket, rid, off, **k: (log, off))
-    assert pr._non_retryable({"id": "run-1", "progress": {}}, "us-east-1", "b") is None
+    assert pr.failed_fraction({}, 256) is None
+    assert pr.failed_fraction({pr.MISSING_SESSIONS: 128}, 256) == 0.5
+    # half dropped, and the agent failed half of the remaining sessions
+    assert pr.failed_fraction({pr.MISSING_SESSIONS: 128, pr.ACR_FAILED: 0.5}, 256) == 0.75
+    assert pr.failed_fraction({pr.ACR_FAILED: 0.9}, 256) == 0.9
+
+
+def _guard_metrics(run_id: str, per_step: dict[int, dict[str, float]]) -> None:
+    with session_scope() as s:
+        for step, metrics in per_step.items():
+            for k, v in metrics.items():
+                s.add(RunMetric(run_id=run_id, step=step, key=k, value=v))
+
+
+def _guard_run(**spec_extra):
+    return {
+        "id": "run-g",
+        "spec": {
+            "plan": plan(params_b=2.27, spec=CATALOG["p5.4xlarge"]).to_dict(),
+            "params": {},
+            **spec_extra,
+        },
+        "compute": {"max_hours": 1},
+    }
+
+
+def test_rollout_failure_guard_needs_consecutive_failing_steps(run_env):
+    from app.pipelines import run as pr
+
+    with session_scope() as s:
+        r = s.get(Run, "run-1")
+        s.add(
+            Run(
+                id="run-g",
+                name="g",
+                agent_runtime_id="rt-1",
+                cluster_id="cl-1",
+                train_dataset_id="ds-1",
+                model_id=r.model_id,
+                spec={},
+                compute={},
+                status="running",
+                progress={},
+            )
+        )
+    bad = {pr.ACR_FAILED: 0.9}
+    _guard_metrics("run-g", {1: bad, 2: bad})
+    assert pr.rollout_failure_guard(_guard_run()) is None  # only two steps so far
+    _guard_metrics("run-g", {3: {pr.ACR_FAILED: 0.2}, 4: bad, 5: bad})
+    assert pr.rollout_failure_guard(_guard_run()) is None  # step 3 broke the streak
+    _guard_metrics("run-g", {6: bad})
+    assert "steps 4-6" in pr.rollout_failure_guard(_guard_run())
+    # async modes resample failed groups: their counts do not mean the same thing
+    assert pr.rollout_failure_guard(_guard_run(training_mode="colocate_async")) is None
 
 
 def test_cost_accrues_only_for_billed_nodes(monkeypatch):
@@ -1388,3 +1440,18 @@ def test_backend_restart_keeps_mode_and_does_not_duplicate_submission(
         )
     with session_scope() as s:
         assert s.get(Run, "run-1").spec == original
+
+
+@pytest.mark.parametrize("contract", [None, "verl"])
+def test_run_refuses_a_runtime_on_the_v01_contract(client, mode_request, run_env, contract):
+    """A v0.1 image (AgentCoreRLApp + S3 results) would fail every rollout of the run."""
+    with session_scope() as s:
+        s.get(AgentRuntime, "rt-1").contract = contract
+        counts = (s.query(Run).count(), s.query(Job).count())
+    for endpoint in ("/api/runs/preview", "/api/runs"):
+        response = client.post(endpoint, json=mode_request)
+        assert response.status_code == 409, response.text
+        assert response.json()["code"] == "agent.contract_outdated"
+    with session_scope() as s:
+        assert (s.query(Run).count(), s.query(Job).count()) == counts
+    assert not run_env["applied"]

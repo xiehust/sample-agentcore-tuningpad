@@ -67,6 +67,9 @@ def validate_training_contract(
 
 
 GATEWAY_PORT = 18765
+ROLLOUT_SESSION_BACKEND = (
+    "agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession"
+)
 # Must match the trainer image (toolkit uv.lock pins ray 2.56.0).
 RAY_VERSION = "2.56.0"
 SUBMITTER_IMAGE = f"rayproject/ray:{RAY_VERSION}-py312"
@@ -310,8 +313,9 @@ def overrides(
                 "actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method": "uniform",
                 "actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers": 1,
                 "++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion": False,
+                # verl 0.10 dropped actor.megatron.grad_offload (its param_offload also
+                # frees the grad buffers), so the planner's grad_offload is not rendered.
                 "actor_rollout_ref.actor.megatron.param_offload": plan["param_offload"],
-                "actor_rollout_ref.actor.megatron.grad_offload": plan["grad_offload"],
                 "actor_rollout_ref.actor.megatron.optimizer_offload": plan["optimizer_offload"],
                 "actor_rollout_ref.rollout.log_prob_use_dynamic_bsz": False,
                 "actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu": per_gpu,
@@ -349,27 +353,27 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
     loop: dict[str, Any] = {
         "name": "agentcore_agent",
         "_target_": "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop",
-        "agent_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
-        "s3_bucket": "${oc.env:ACR_S3_BUCKET}",
-        "exp_id": "${oc.env:EXP_ID}",
+        # v0.2 contract: HTTP start/get on the runtime, `_config` in, scalar `reward` out.
+        "rollout_session_backend": {
+            "backend": ROLLOUT_SESSION_BACKEND,
+            "agentcore_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
+        },
         **{
             k: params.get(k) or template_loop.get(k, default)
             for k, default in AGENT_LOOP_DEFAULTS.items()
         },
         "gateway_port": GATEWAY_PORT,
         # The port is reachable from the agents' VPC ENIs: only pre-registered sessions.
+        # Added by the pinned fork (upstream PR awslabs/agentcore-rl-toolkit#250); the
+        # trainer image build asserts it is wired (the loop would swallow it silently).
         "require_registered_sessions": True,
     }
     for k in (
         "history_mode",
         "linear_on_nonlinear",
+        "rollout_concurrency",
         "reward_extra_info_defaults",
         "reward_thresholds",
-        # Rollout failure policy (toolkit defaults: drop agent errors and timeouts,
-        # retry transient failures once); a template may override them.
-        "drop_agent_errors",
-        "max_rollout_retries",
-        "timeout_policy",
     ):
         if template_loop.get(k) is not None:
             loop[k] = template_loop[k]
@@ -399,11 +403,6 @@ def train_script(
         # verl's default config (ppo_trainer) has no actor.megatron node: every megatron
         # override fails with "Key 'megatron' is not in struct" (run-dad915e023).
         args = "--config-name ppo_megatron_trainer \\\n    " + args
-    patch = (
-        "bash /opt/toolkit/patches/apply-megatron-bridge-cp-clamp.sh || true\n"
-        if profile == "megatron"
-        else ""
-    )
     return f"""#!/usr/bin/env bash
 # Rendered by TuningPad for run {run_id}. Runs as the Ray job driver on the head pod.
 set -euo pipefail
@@ -411,7 +410,7 @@ RUN_DIR={shlex.quote(run_dir)}
 mkdir -p "$RUN_DIR/data" "$RUN_DIR/ckpt" "$RUN_DIR/logs"
 LOG="$RUN_DIR/logs/train.log"
 export HF_HOME={FSX_MOUNT}/hf
-{patch}
+
 # Durable progress for the console: log + checkpoint index to S3 every 30 s.
 # A step counts only while its actor/ dir exists: verl's max_actor_ckpt_to_keep deletes
 # global_step_N/actor of rotated-out steps but leaves the global_step_N dir behind.
@@ -440,12 +439,10 @@ python3 -m verl.trainer.main_ppo \\
 
 
 def pod_env(
-    *, run_id: str, region: str, bucket: str, runtime_arn: str, multi_node: bool, spec: InstanceSpec
+    *, region: str, runtime_arn: str, multi_node: bool, spec: InstanceSpec
 ) -> list[dict[str, Any]]:
     env = {
         "AGENT_RUNTIME_ARN": runtime_arn,
-        "ACR_S3_BUCKET": bucket,
-        "EXP_ID": f"rollouts/{run_id}",
         "GATEWAY_PORT": str(GATEWAY_PORT),
         "AWS_REGION": region,
         "AWS_DEFAULT_REGION": region,

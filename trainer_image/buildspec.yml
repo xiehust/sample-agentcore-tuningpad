@@ -1,5 +1,6 @@
 # CodeBuild (privileged, x86_64) — source is the S3 zip TuningPad uploads:
-#   Dockerfile, buildspec.yml, toolkit/ (git-tracked files of the toolkit checkout)
+#   Dockerfile, buildspec.yml, patches/ (TuningPad patches), toolkit/ (git-tracked files
+#   of the toolkit checkout)
 version: 0.2
 env:
   variables:
