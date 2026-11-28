@@ -234,12 +234,14 @@ class FakeProcesses:
         paths: rollout.Paths,
         *,
         verifier_reward: str | None = "1.0",
+        verifier_json: str | None = None,
         tamper=False,
         answer=True,
         stream=None,
     ):
         self.paths = paths
         self.verifier_reward = verifier_reward
+        self.verifier_json = verifier_json
         self.tamper = tamper
         self.answer = answer
         self.stream = stream
@@ -272,9 +274,11 @@ class FakeProcesses:
             return rollout.Completed(0, stream, "")
         seen["tests_listing"] = sorted(p.name for p in self.paths.tests.iterdir())
         seen["test_sh"] = (self.paths.tests / "test.sh").read_text()
+        (self.paths.logs / "verifier").mkdir(parents=True, exist_ok=True)
         if self.verifier_reward is not None:
-            (self.paths.logs / "verifier").mkdir(parents=True, exist_ok=True)
             (self.paths.logs / "verifier" / "reward.txt").write_text(self.verifier_reward)
+        if self.verifier_json is not None:
+            (self.paths.logs / "verifier" / "reward.json").write_text(self.verifier_json)
         return rollout.Completed(0, "", "")
 
 
@@ -410,3 +414,28 @@ def test_a_harness_killed_at_the_timeout_takes_its_children_with_it(tmp_path):
         timeout=0.5,
     )
     assert done.returncode is None and time.monotonic() - start < 10
+
+
+@pytest.mark.parametrize(
+    ("reward_json", "expected"),
+    [
+        # SmolDataEnvs multi-reward Verifiers: correctness is the training signal
+        ('{"correctness": 1.0, "submission": 1.0, "tool_efficiency": 0.4}', 1.0),
+        ('{"correctness": 0.0, "submission": 1.0, "tool_efficiency": null}', 0.0),
+        ('{"reward": 1.0, "other": 0.0}', 1.0),
+        ('{"score": 1.0}', 1.0),  # a single score is used whatever its name
+        ('{"a": 1.0, "b": 0.0}', None),  # ambiguous: never combine scores
+        ("not json", None),
+    ],
+)
+def test_a_multi_reward_verifier_is_read_from_reward_json(world, reward_json, expected):
+    procs = FakeProcesses(world["paths"], verifier_reward=None, verifier_json=reward_json)
+    out = _run(world, procs)
+    assert out["metrics"].get("verifier_reward") == expected
+
+
+def test_metrics_are_all_numbers_even_without_a_verifier_result(world):
+    """The toolkit's rollout result schema takes float metrics only."""
+    out = _run(world, FakeProcesses(world["paths"], verifier_reward=None))
+    assert all(isinstance(v, int | float) for v in out["metrics"].values())
+    assert "verifier_reward" not in out["metrics"]

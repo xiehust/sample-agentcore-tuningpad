@@ -12,6 +12,8 @@ Each AgentCore session is its own microVM; directories are still cleared first.
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import shutil
 import signal
@@ -32,6 +34,9 @@ DEFAULT_HARNESS_TIMEOUT_S = 1200.0
 # TuningPad's smoke waits 600s per rollout; leave room for staging and the Verifier
 SMOKE_HARNESS_TIMEOUT_S = 300.0
 DEFAULT_VERIFIER_TIMEOUT_S = 120.0
+# A multi-reward Verifier (reward.json) is read by its only score, else by the first of
+# these names; scores are never combined, since any weighting becomes the objective.
+REWARD_KEYS = ("correctness", "reward")
 
 
 class HarnessUnavailable(RuntimeError):
@@ -119,10 +124,32 @@ def _pick_harness(payload: dict[str, Any], installed: list[str]):
 
 
 def _verifier_reward(paths: Paths) -> float | None:
+    """Harbor's convention: reward.json (named scores) takes precedence over reward.txt."""
+    out = paths.logs / "verifier"
     try:
-        return float((paths.logs / "verifier" / "reward.txt").read_text().strip())
+        scores = json.loads((out / "reward.json").read_text())
     except (OSError, ValueError):
+        scores = None
+    if scores is not None:
+        if not isinstance(scores, dict):
+            return None
+        if len(scores) == 1:
+            value = next(iter(scores.values()))
+        else:
+            value = next((scores[k] for k in REWARD_KEYS if k in scores), None)
+        return _finite(value)
+    try:
+        return _finite((out / "reward.txt").read_text().strip())
+    except OSError:
         return None
+
+
+def _finite(value: Any) -> float | None:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 def run_rollout(
@@ -205,10 +232,11 @@ def run_rollout(
     out: dict[str, Any] = {
         "reward": score,
         "harness": harness.NAME,
+        # the toolkit's rollout result takes numeric metrics only: omit what is unknown
         "metrics": {
             "tool_calls": parsed.tool_calls,
-            "verifier_reward": verifier_reward,
             "correct": int(verifier_reward is not None and verifier_reward >= 1.0),
+            **({"verifier_reward": verifier_reward} if verifier_reward is not None else {}),
         },
         "stop_reason": stop_reason,
     }
