@@ -78,3 +78,24 @@ def test_validation_reward_averages_over_data_sources():
         "claude_code": {"reward": 0.6},
         "opencode": {"reward": 0.8},
     }
+
+
+def test_validation_metrics_use_the_highest_sample_count():
+    """verl names validation means mean@{val_n}; sources may contain slashes."""
+    step = {
+        "val-core/openai/gsm8k/reward/mean@4": 0.5,
+        "val-aux/openai/gsm8k/reward/mean@2": 0.1,
+        "val-aux/openai/gsm8k/acr_failed/mean@4": 0.25,
+        "val-aux/num_turns/mean": 3.0,
+    }
+    assert verl_log.by_source(step) == {"openai/gsm8k": {"reward": 0.5, "acr_failed": 0.25}}
+
+
+def test_derived_validation_series_average_over_sources():
+    metrics = {
+        0: {"val-core/a/reward/mean@1": 0.2, "val-core/b/reward/mean@1": 0.4},
+        5: {"val-aux/a/acr_failed/mean@1": 0.1, "val-aux/b/acr_failed/mean@1": 0.3},
+    }
+    s = verl_log.derived_series(metrics)
+    assert s["val/reward"] == [[0, pytest.approx(0.3)]]
+    assert s["val/acr_failed"] == [[5, pytest.approx(0.2)]]

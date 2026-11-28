@@ -10,7 +10,7 @@ from ..catalog import instances, models
 from ..core.db import new_id, session_scope
 from ..core.errors import AppError, NotFound
 from ..jobs.engine import get_engine, job_view, latest_job
-from ..metrics.verl_log import KEY_METRICS, source_series, summarize
+from ..metrics.verl_log import KEY_METRICS, derived_series, source_series, summarize
 from ..models import AgentRuntime, Dataset, Run, RunMetric
 from ..pipelines import cluster as pc
 from ..pipelines.run import load_run
@@ -272,6 +272,7 @@ def get_run(run_id: str):
             ms.setdefault(m.step, {})[m.key] = m.value
     v["summary"] = summarize(ms)
     v["series"] = {k: [[s, d[k]] for s, d in sorted(ms.items()) if k in d] for k in KEY_METRICS}
+    v["series"] |= derived_series(ms)
     # validation per data source; for a multi-Harness run, per Harness
     v["by_source"] = source_series(ms)
     v["metric_keys"] = sorted({k for d in ms.values() for k in d})

@@ -1769,8 +1769,9 @@ def test_run_data_names_the_harness_as_its_data_source(harness_agent, stub_aws):
 def test_multi_harness_forwards_correct_and_tool_calls_to_verl():
     from app.templates_lib import get_template
 
-    loop = rt.agent_loop_settings(get_template("multi_harness")["agent_loop"], rt.merge_params({}))
-    assert loop["reward_extra_info_defaults"] == {"correct": 0.0, "tool_calls": 0.0}
+    tpl_loop = get_template("multi_harness")["agent_loop"]
+    rendered = yaml.safe_load(rt.agent_loop_yaml(tpl_loop, rt.merge_params({})))[0]
+    assert rendered["reward_extra_info_defaults"] == {"correct": 0.0, "tool_calls": 0.0}
 
 
 def test_run_views_report_validation_per_harness(client, run_env):
@@ -1797,3 +1798,5 @@ def test_run_views_report_validation_per_harness(client, run_env):
     assert d["summary"]["baseline_val_reward"] == pytest.approx(0.3)
     assert d["by_source"]["opencode"]["reward"] == [[0, 0.4], [5, 0.8]]
     assert d["by_source"]["opencode"]["tool_calls"] == [[0, 9.0], [5, 9.0]]
+    # the run's own validation curve no longer depends on an "unknown" source
+    assert d["series"]["val/reward"] == [[0, pytest.approx(0.3)], [5, pytest.approx(0.7)]]

@@ -531,10 +531,10 @@ function RunLog({ id, live }: { id: string; live: boolean }) {
 }
 
 const CHARTS: { key: string; title: string; series: string[]; fixed01?: boolean }[] = [
-  { key: "reward", title: "runs.chartReward", series: ["val-core/unknown/reward/mean@1", "critic/score/mean"], fixed01: true },
+  { key: "reward", title: "runs.chartReward", series: ["val/reward", "critic/score/mean"], fixed01: true },
   { key: "kl", title: "runs.chartKl", series: ["actor/kl_loss"] },
   { key: "len", title: "runs.chartLength", series: ["response_length/mean"] },
-  { key: "health", title: "runs.chartHealth", series: ["training/rollout_failure/total_missing_sessions", "agent_loop/acr_failed/mean", "val-aux/unknown/acr_failed/mean@1"] },
+  { key: "health", title: "runs.chartHealth", series: ["training/rollout_failure/total_missing_sessions", "agent_loop/acr_failed/mean", "val/acr_failed"] },
   { key: "time", title: "runs.chartTime", series: ["timing_s/step", "timing_s/gen"] },
   { key: "grad", title: "runs.chartGrad", series: ["actor/grad_norm", "actor/entropy"] },
 ];
@@ -606,7 +606,7 @@ function RunDetail({ id }: { id: string }) {
           ]}
         />
         {tab === "metrics" && run.spec.harnesses && (
-          <HarnessCharts names={run.spec.harnesses.names} bySource={run.by_source ?? {}} />
+          <HarnessCharts names={[...run.spec.harnesses.names, ...Object.keys(run.by_source ?? {}).filter((h) => h !== "unknown" && !run.spec.harnesses?.names.includes(h)).sort()]} bySource={run.by_source ?? {}} />
         )}
         {tab === "metrics" && (
           <div className="tp-grid c2">
@@ -648,7 +648,7 @@ function RunDetail({ id }: { id: string }) {
               empty={t("runs.noCkpt")}
               columns={[
                 { key: "s", title: t("runs.step"), render: (x) => `global_step_${x}` },
-                { key: "v", title: t("runs.valReward"), render: (x) => num(run.series?.["val-core/unknown/reward/mean@1"]?.find((p) => p[0] === x)?.[1], 3) },
+                { key: "v", title: t("runs.valReward"), render: (x) => num(run.series?.["val/reward"]?.find((p) => p[0] === x)?.[1], 3) },
                 { key: "a", title: "", render: (x) => <Button size="sm" kind="primary" onClick={() => void exportStep(x)}>{t("runs.export")}</Button> },
               ]}
             />

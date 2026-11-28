@@ -66,16 +66,42 @@ def parse_chunk(carry: str, chunk: str) -> tuple[list[tuple[int, dict[str, float
     return recs, carry_out
 
 
-_VAL = re.compile(r"^val-(?:core|aux)/(?P<src>[^/]+)/(?P<var>[^/]+)/mean@1$")
+# verl: val-core|val-aux/<data_source>/<variable>/mean@<samples per Task>; data sources
+# may contain slashes (e.g. openai/gsm8k), variables do not
+_VAL = re.compile(r"^val-(?:core|aux)/(?P<src>.+)/(?P<var>[^/]+)/mean@(?P<n>\d+)$")
 
 
 def by_source(step_metrics: dict[str, float]) -> dict[str, dict[str, float]]:
     """Validation means per data_source (a multi-Harness run's data_source is the Harness):
-    {source: {variable: value}} from `val-core|val-aux/<source>/<variable>/mean@1`."""
-    out: dict[str, dict[str, float]] = {}
+    {source: {variable: value}}, taking the mean over all of a Task's samples (the highest
+    @N, i.e. val_n)."""
+    best: dict[tuple[str, str], tuple[int, float]] = {}
     for key, value in step_metrics.items():
         if m := _VAL.match(key):
-            out.setdefault(m["src"], {})[m["var"]] = value
+            k, n = (m["src"], m["var"]), int(m["n"])
+            if k not in best or n > best[k][0]:
+                best[k] = (n, value)
+    out: dict[str, dict[str, float]] = {}
+    for (src, var), (_, value) in best.items():
+        out.setdefault(src, {})[var] = value
+    return out
+
+
+def _mean_over_sources(step_metrics: dict[str, float], var: str) -> float | None:
+    values = [v[var] for v in by_source(step_metrics).values() if var in v]
+    return sum(values) / len(values) if values else None
+
+
+def derived_series(metrics: dict[int, dict[str, float]]) -> dict[str, list]:
+    """Run-level validation curves whatever the data sources: `val/reward` and
+    `val/acr_failed`, the mean over sources at each validation step."""
+    out: dict[str, list] = {}
+    for name, var in (("val/reward", "reward"), ("val/acr_failed", "acr_failed")):
+        out[name] = [
+            [step, v]
+            for step in sorted(metrics)
+            if (v := _mean_over_sources(metrics[step], var)) is not None
+        ]
     return out
 
 
@@ -91,8 +117,7 @@ def source_series(metrics: dict[int, dict[str, float]]) -> dict[str, dict[str, l
 
 def _val_reward(step_metrics: dict[str, float]) -> float | None:
     """The step's validation reward: the mean over data sources (one for most runs)."""
-    rewards = [v["reward"] for v in by_source(step_metrics).values() if "reward" in v]
-    return sum(rewards) / len(rewards) if rewards else None
+    return _mean_over_sources(step_metrics, "reward")
 
 
 def summarize(metrics: dict[int, dict[str, float]]) -> dict[str, float | int | None]:
