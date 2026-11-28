@@ -14,7 +14,7 @@ dependencies = [
     "python-multipart==0.0.20",
     "boto3==1.43.83",
     "kubernetes==36.0.3",
-    "huggingface-hub==0.36.0",
+    "huggingface-hub==2.5.0",
     "pandas==2.3.3",
     "pyarrow==21.0.0",
     "agentcore-rl-toolkit[rollout]",

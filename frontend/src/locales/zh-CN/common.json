@@ -146,7 +146,10 @@
     "node.not_found": "节点不存在",
     "node.system_group": "不能在 TuningPad 中替换 system 节点",
     "node.confirm_replace": "请确认后再替换节点",
-    "node.replace_failed": "节点替换失败"
+    "node.replace_failed": "节点替换失败",
+    "dataset.harbor_mixed_images": "这些 Task 不共用同一个环境镜像。TuningPad 只接受共用单一镜像的 Task 集。",
+    "dataset.harbor_invalid_task": "有 Task 不符合预期的 Harbor 格式，或者找不到它的输入文件。",
+    "dataset.no_estimate": "这个内置数据集没有数据量估算。"
   },
   "common": {
     "apply": "应用",
@@ -611,7 +614,17 @@
     "summary": "概要",
     "preview": "预览",
     "deleteTitle": "删除数据集？",
-    "deleteBody": "删除数据集及其在 S3 中的文件。"
+    "deleteBody": "删除数据集及其在 S3 中的文件。",
+    "builtin_smoldataenvs": "SmolDataEnvs 数据分析 Task，复制到你的 bucket：按难度分层的 train 子集，加上 held-out test 集",
+    "smolTrainTasks": "Train Task 数量",
+    "smolTrainTasksHint": "从 5000 个中按难度分层抽取；held-out test 集总会导入",
+    "smolMaxInput": "单个 Task 输入上限（GB）",
+    "smolMaxInputHint": "输入文件超过上限的 Task 会被跳过",
+    "smolAll": "导入全部 train Task",
+    "smolAllHint": "全部 5000 个 train Task（输入文件约 30 GB）",
+    "smolEstimate": "估算",
+    "smolEstimateResult": "{{train}} 个 train + {{test}} 个 test Task，跳过 {{skipped}} 个，输入文件 {{gb}} GB",
+    "smolLicense": "SmolDataEnvs 采用 MIT 许可。输入文件来自 Kaggle 数据集，各有各的许可。"
   },
   "runs": {
     "create": "新建训练任务",

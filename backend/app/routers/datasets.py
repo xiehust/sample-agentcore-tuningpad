@@ -11,6 +11,7 @@ from ..core.errors import AppError, NotFound
 from ..jobs.engine import get_engine, job_view, latest_job
 from ..models import Dataset
 from ..services import datasets as svc
+from ..services import harbor
 from ..services import project as proj
 from ..templates_lib import get_template
 
@@ -61,14 +62,44 @@ class BuiltinBody(BaseModel):
     name: str | None = None
     region: str | None = None
     limit: int | None = Field(None, ge=1, le=1000)  # OfficeBench: subset of task dirs
+    # SmolDataEnvs: stratified train subset (or all), per-Task input size cap
+    train_tasks: int | None = Field(None, ge=1, le=5000)
+    all_tasks: bool = False
+    max_input_gb: float | None = Field(None, gt=0, le=100)
+
+
+def _smol_args(body: BuiltinBody) -> dict[str, Any]:
+    return {
+        "train_n": body.train_tasks or harbor.DEFAULT_TRAIN_TASKS,
+        "all_tasks": body.all_tasks,
+        "max_input_bytes": int(body.max_input_gb * 1024**3)
+        if body.max_input_gb
+        else harbor.DEFAULT_MAX_INPUT_BYTES,
+    }
+
+
+def _builtin_kind(template_id: str) -> str:
+    kind = (get_template(template_id).get("dataset") or {}).get("builtin")
+    if not kind:
+        raise AppError("dataset.no_builtin", f"template {template_id} has no built-in dataset")
+    return kind
+
+
+@router.post("/builtin/estimate")
+def builtin_estimate(body: BuiltinBody):
+    """Tasks selected and input bytes transferred by an import with these settings."""
+    if _builtin_kind(body.template_id) != "smoldataenvs":
+        raise AppError("dataset.no_estimate", "only SmolDataEnvs imports have an estimate")
+    a = _smol_args(body)
+    return harbor.smoldataenvs_estimate(
+        train_n=a["train_n"], all_tasks=a["all_tasks"], max_input_bytes=a["max_input_bytes"]
+    )
 
 
 @router.post("/builtin")
 def builtin(body: BuiltinBody):
     t = get_template(body.template_id)
-    kind = (t.get("dataset") or {}).get("builtin")
-    if not kind:
-        raise AppError("dataset.no_builtin", f"template {body.template_id} has no built-in dataset")
+    kind = _builtin_kind(body.template_id)
     region = body.region or get_settings().default_region
     proj.require_region(region)
     pay = t.get("payload") or {}
@@ -89,7 +120,15 @@ def builtin(body: BuiltinBody):
                 stats={},
             )
         )
-    job = get_engine().start("dataset.builtin", did, {"builtin": kind, "limit": body.limit})
+    job_payload: dict[str, Any] = {"builtin": kind, "limit": body.limit}
+    if kind == "smoldataenvs":
+        a = _smol_args(body)
+        job_payload |= {
+            "train_tasks": a["train_n"],
+            "all_tasks": a["all_tasks"],
+            "max_input_bytes": a["max_input_bytes"],
+        }
+    job = get_engine().start("dataset.builtin", did, job_payload)
     return {"id": did, "job_id": job}
 
 

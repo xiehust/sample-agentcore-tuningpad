@@ -567,12 +567,29 @@ export interface DatasetView {
   job: Job | null;
 }
 
+export interface BuiltinBody {
+  template_id: string;
+  name?: string;
+  region: string;
+  limit?: number | null;
+  train_tasks?: number | null;
+  all_tasks?: boolean;
+  max_input_gb?: number | null;
+}
+
+export interface BuiltinEstimate {
+  train: number;
+  test: number;
+  skipped: number;
+  input_bytes: number;
+}
+
 export const datasetApi = {
   list: () => get<DatasetView[]>("/api/datasets"),
   get: (id: string) => get<DatasetView>(`/api/datasets/${id}`),
   preview: (id: string, split: string) => get<Record<string, unknown>[]>(`/api/datasets/${id}/preview?${q({ split })}`),
-  builtin: (body: { template_id: string; name?: string; region: string; limit?: number | null }) =>
-    post<{ id: string; job_id: string }>("/api/datasets/builtin", body),
+  builtin: (body: BuiltinBody) => post<{ id: string; job_id: string }>("/api/datasets/builtin", body),
+  builtinEstimate: (body: BuiltinBody) => post<BuiltinEstimate>("/api/datasets/builtin/estimate", body),
   upload: (form: FormData) => requestForm<{ id: string; job_id: string }>("/api/datasets/upload", form),
   remove: (id: string) => del<{ ok: boolean }>(`/api/datasets/${id}`),
 };

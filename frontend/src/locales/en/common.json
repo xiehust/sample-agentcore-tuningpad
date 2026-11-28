@@ -146,7 +146,10 @@
     "node.not_found": "Node not found",
     "node.system_group": "The system node cannot be replaced from TuningPad",
     "node.confirm_replace": "Confirm to replace the node",
-    "node.replace_failed": "The node could not be replaced"
+    "node.replace_failed": "The node could not be replaced",
+    "dataset.harbor_mixed_images": "These Tasks do not share one environment image. TuningPad only accepts Task sets with a single shared image.",
+    "dataset.harbor_invalid_task": "A Task is not in the expected Harbor format or its input files are missing.",
+    "dataset.no_estimate": "This built-in dataset has no size estimate."
   },
   "common": {
     "apply": "Apply",
@@ -611,7 +614,17 @@
     "summary": "Summary",
     "preview": "Preview",
     "deleteTitle": "Delete dataset?",
-    "deleteBody": "Deletes the dataset and its files in S3."
+    "deleteBody": "Deletes the dataset and its files in S3.",
+    "builtin_smoldataenvs": "SmolDataEnvs data-analysis Tasks staged in your bucket: a stratified train subset plus the held-out test set",
+    "smolTrainTasks": "Train Tasks",
+    "smolTrainTasksHint": "Stratified by difficulty from 5,000; the held-out test set is always imported",
+    "smolMaxInput": "Max input per Task (GB)",
+    "smolMaxInputHint": "Tasks whose input files are larger are skipped",
+    "smolAll": "Import all train Tasks",
+    "smolAllHint": "All 5,000 train Tasks (about 30 GB of input files)",
+    "smolEstimate": "Estimate",
+    "smolEstimateResult": "{{train}} train + {{test}} test Tasks, {{skipped}} skipped, {{gb}} GB of input files",
+    "smolLicense": "SmolDataEnvs is MIT-licensed. Its input files come from Kaggle datasets, each under its own license."
   },
   "runs": {
     "create": "New training run",

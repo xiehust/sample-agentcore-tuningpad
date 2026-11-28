@@ -1,0 +1,15 @@
+id: multi_harness
+name: {en: "Multi-harness (SmolDataEnvs data analysis)", zh-CN: "多 Harness（SmolDataEnvs 数据分析）"}
+description:
+  en: "Trains one model inside unmodified agent harnesses on SmolDataEnvs data-analysis tasks. Each Task's own verifier grades the answer after the harness exits."
+  zh-CN: "在不修改的 agent harness 里，用 SmolDataEnvs 数据分析任务训练同一个模型。Harness 退出后由 Task 自带的 Verifier 给答案打分。"
+contract: verl-v2
+verified: false
+params: []
+payload:
+  prompt_field: null           # payload carries S3 URIs; the prompt column is the Task instruction
+  required: [task_id, task_uri, input_uri]
+  explicit_prompt_column: true
+dataset: {builtin: smoldataenvs}
+smoke_payloads: []             # filled from the generated dataset (first two val rows)
+presets: []

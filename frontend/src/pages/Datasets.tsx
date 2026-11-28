@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { JobPanel } from "../components/JobPanel";
 import { StatusTag } from "../components/StatusTag";
-import { agentApi, datasetApi, errorMessage } from "../lib/api";
+import { agentApi, datasetApi, errorMessage, type BuiltinBody, type BuiltinEstimate } from "../lib/api";
 import { dateTime, num } from "../lib/format";
 import { useLocalized } from "../lib/localized";
 import { DETAIL_POLL_MS, LIST_POLL_MS, usePoll } from "../lib/poll";
@@ -75,6 +75,11 @@ function CreateDataset() {
   const [name, setName] = useState("");
   const [region, setRegion] = useState("us-east-1");
   const [limit, setLimit] = useState("");
+  const [trainTasks, setTrainTasks] = useState("1000");
+  const [allTasks, setAllTasks] = useState(false);
+  const [maxInputGb, setMaxInputGb] = useState("1");
+  const [estimate, setEstimate] = useState<BuiltinEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
   const [train, setTrain] = useState<File | null>(null);
   const [val, setVal] = useState<File | null>(null);
   const [promptField, setPromptField] = useState("prompt");
@@ -84,13 +89,33 @@ function CreateDataset() {
   const [forTemplate, setForTemplate] = useState("");
   const [busy, setBusy] = useState(false);
   const builtinTemplates = (templates.data ?? []).filter((x) => x.dataset?.builtin);
+  const builtinKind = builtinTemplates.find((x) => x.id === templateId)?.dataset?.builtin;
+  const builtinBody = (): BuiltinBody => ({
+    template_id: templateId,
+    name: name || undefined,
+    region,
+    limit: limit ? Number(limit) : null,
+    ...(builtinKind === "smoldataenvs"
+      ? { train_tasks: trainTasks ? Number(trainTasks) : null, all_tasks: allTasks, max_input_gb: maxInputGb ? Number(maxInputGb) : null }
+      : {}),
+  });
+  const runEstimate = async () => {
+    setEstimating(true);
+    try {
+      setEstimate(await datasetApi.builtinEstimate(builtinBody()));
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setEstimating(false);
+    }
+  };
 
   const submit = async () => {
     setBusy(true);
     try {
       let id: string;
       if (mode === "builtin") {
-        id = (await datasetApi.builtin({ template_id: templateId, name: name || undefined, region, limit: limit ? Number(limit) : null })).id;
+        id = (await datasetApi.builtin(builtinBody())).id;
       } else {
         if (!train) throw new Error(t("datasets.trainRequired"));
         const f = new FormData();
@@ -144,6 +169,28 @@ function CreateDataset() {
                 <OptionCard key={x.id} title={loc(x.name)} desc={t(`datasets.builtin_${x.dataset?.builtin}`)} on={templateId === x.id} onClick={() => setTemplateId(x.id)} />
               ))}
             </div>
+            {builtinKind === "smoldataenvs" && (
+              <>
+                <div className="v2-form cols-2" style={{ marginTop: 16 }}>
+                  <Field label={t("datasets.smolTrainTasks")} hint={t("datasets.smolTrainTasksHint")}>
+                    <input className="v2-input" type="number" min={1} max={5000} value={trainTasks} disabled={allTasks} onChange={(e) => { setTrainTasks(e.target.value); setEstimate(null); }} />
+                  </Field>
+                  <Field label={t("datasets.smolMaxInput")} hint={t("datasets.smolMaxInputHint")}>
+                    <input className="v2-input" type="number" min={0.1} step={0.1} value={maxInputGb} onChange={(e) => { setMaxInputGb(e.target.value); setEstimate(null); }} />
+                  </Field>
+                  <Field label={t("datasets.smolAll")} full>
+                    <label className="tp-row"><input type="checkbox" checked={allTasks} onChange={(e) => { setAllTasks(e.target.checked); setEstimate(null); }} />{t("datasets.smolAllHint")}</label>
+                  </Field>
+                </div>
+                <div className="tp-row" style={{ marginTop: 12 }}>
+                  <Button disabled={estimating} onClick={() => void runEstimate()} testId="tp-dataset-estimate">{t("datasets.smolEstimate")}</Button>
+                  {estimate && (
+                    <span>{t("datasets.smolEstimateResult", { train: num(estimate.train), test: num(estimate.test), skipped: num(estimate.skipped), gb: (estimate.input_bytes / 1024 ** 3).toFixed(1) })}</span>
+                  )}
+                </div>
+                <Alert tone="info">{t("datasets.smolLicense")}</Alert>
+              </>
+            )}
             {templateId === "officebench" && (
               <div className="v2-form cols-2" style={{ marginTop: 16 }}>
                 <Field label={t("datasets.limit")} hint={t("datasets.limitHint")}>

@@ -10,6 +10,7 @@ from ..core.errors import AppError
 from ..jobs.engine import Stage, StageContext, register
 from ..models import Dataset
 from ..services import datasets as svc
+from ..services import harbor
 from ..services import project as proj
 
 VAL_SUBSET = 200  # verified experiment: 200-question val subset keeps validation cheap
@@ -77,6 +78,7 @@ def stage_ingest(ctx: StageContext) -> None:
 def stage_builtin(ctx: StageContext) -> None:
     d = _load(ctx.target_id)
     kind = ctx.payload["builtin"]
+    extra: dict[str, int] = {}
     if kind == "gsm8k":
         data = svc.gsm8k_rows()
         splits = {"train": data["train"], "val": data["test"][:VAL_SUBSET], "test": data["test"]}
@@ -86,13 +88,27 @@ def stage_builtin(ctx: StageContext) -> None:
             d["id"], d["region"], res["bucket"], ctx.log, limit=ctx.payload.get("limit")
         )
         splits = {"train": data["train"], "val": data["val"]}
+    elif kind == "smoldataenvs":
+        res = proj.require_region(d["region"])
+        p = ctx.payload
+        data = harbor.smoldataenvs_rows(
+            d["id"],
+            d["region"],
+            res["bucket"],
+            ctx.log,
+            train_n=p.get("train_tasks") or harbor.DEFAULT_TRAIN_TASKS,
+            all_tasks=bool(p.get("all_tasks")),
+            max_input_bytes=p.get("max_input_bytes") or harbor.DEFAULT_MAX_INPUT_BYTES,
+        )
+        splits = {"train": data["train"], "val": data["val"], "test": data["test"]}
+        extra["skipped"] = data["skipped"]
     else:
         raise AppError("dataset.unknown_builtin", f"unknown built-in dataset {kind}")
     for rows in splits.values():
         svc.validate_rows(
             rows, prompt_field=d["prompt_field"], explicit_prompt=d["has_prompt_column"]
         )
-    _save(d["id"], stats={k: len(v) for k, v in splits.items()})
+    _save(d["id"], stats={**{k: len(v) for k, v in splits.items()}, **extra})
     _write(ctx, splits)
 
 
