@@ -288,7 +288,7 @@ def endpoint_state(region: str, eks: str, endpoint_id: str) -> dict[str, Any]:
 def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-sample states (`evals.sample_state`, shared with the sample list so
     the counts always agree). Truncation is scored 0; both failure kinds count as 0 in the
-    overall mean."""
+    overall mean; unscored cells (no Verifier result) are left out of both means."""
     from .evals import by_harness, reward_of, sample_state
 
     rewards, failed, truncated, unscored = [], 0, 0, 0
@@ -311,7 +311,6 @@ def summarize_eval(items: list[dict[str, Any]]) -> dict[str, Any]:
         "failed": failed,
         "truncated": truncated,
         "unscored": unscored,
-        # failures count as 0
         "mean_reward": round(sum(rewards) / graded, 4) if graded else None,
         "mean_reward_scored": round(sum(rewards) / len(rewards), 4) if rewards else None,
         "acr_failed_rate": round(failed / n, 4) if n else None,

@@ -44,9 +44,10 @@ function EvalList() {
   const ready = (endpoints.data ?? []).filter((e) => e.status === "ready");
   const ep = ready.find((e) => e.id === form.endpoint_id);
   const runtimes = (agents.data ?? []).flatMap((a) => a.runtimes.filter((r) => r.status === "ready" && r.cluster_id && (!ep || r.cluster_id === ep.cluster_id)).map((r) => ({ a, r })));
-  const rt = runtimes.find(({ r }) => r.id === form.agent_runtime_id)?.r;
+  const picked = runtimes.find(({ r }) => r.id === form.agent_runtime_id);
+  const rt = picked?.r;
   // the Agent's Harnesses: every Task runs once under each picked one (default: all)
-  const installedHarnesses = (runtimes.find(({ r }) => r.id === form.agent_runtime_id)?.a.config.params?.harnesses as string[] | undefined) ?? [];
+  const installedHarnesses = (picked?.a.config.params?.harnesses as string[] | undefined) ?? [];
   const [harnesses, setHarnesses] = useState<string[] | null>(null);
   const pickedHarnesses = harnesses ?? installedHarnesses;
   const ds = (datasets.data ?? []).find((d) => d.id === form.dataset_id);

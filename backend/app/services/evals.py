@@ -89,11 +89,24 @@ def eval_cells(payloads: list[dict[str, Any]], harnesses: list[str] | None) -> l
     ]
 
 
+def task_index_of(item: dict[str, Any]) -> int:
+    """The dataset row (Task) of a cell; rows from before the matrix are one cell per Task."""
+    return item.get("task_index", item["index"])
+
+
+def _cell_key(item: dict[str, Any]) -> tuple[int, str]:
+    return task_index_of(item), item.get("harness") or ""
+
+
 def tool_calls_of(item: dict[str, Any]) -> int | None:
-    """The Agent's own count (multi_harness metrics), else tool uses in the transcript."""
-    n = ((item.get("result") or {}).get("metrics") or {}).get("tool_calls")
+    """The Agent's own count (multi_harness metrics), else tool uses in the transcript,
+    else None."""
+    result = item.get("result") or {}
+    n = (result.get("metrics") or {}).get("tool_calls")
     if isinstance(n, int | float) and not isinstance(n, bool):
         return int(n)
+    if result.get("messages"):
+        return _counts(result.get("messages"))[1]
     return None
 
 
@@ -107,23 +120,23 @@ def solved(item: dict[str, Any]) -> bool:
 
 
 def harness_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """pass@1 over the cells that could be graded (unscored ones excluded, failed ones count
-    as unsolved), and mean tool calls over scored cells."""
+    """pass@1 = solved / graded cells: a cell counts when its one attempt was graded, so
+    unscored and failed (never graded) cells leave the denominator and are shown apart.
+    Mean tool calls over scored cells."""
     states = [sample_state(it) for it in items]
-    unscored = states.count("unscored")
-    graded = len(items) - unscored
+    graded = states.count("scored") + states.count("truncated")
     n_solved = sum(solved(it) for it in items)
     calls = [
         c
         for it, st in zip(items, states, strict=True)
-        if st == "scored"
-        if (c := tool_calls_of(it)) is not None
+        if st == "scored" and (c := tool_calls_of(it)) is not None
     ]
     return {
         "n": len(items),
         "scored": states.count("scored"),
-        "unscored": unscored,
+        "unscored": states.count("unscored"),
         "failed": sum(st in FAILED for st in states),
+        "graded": graded,
         "solved": n_solved,
         "pass_at_1": round(n_solved / graded, 4) if graded else None,
         "mean_tool_calls": round(sum(calls) / len(calls), 2) if calls else None,
@@ -138,31 +151,34 @@ def by_harness(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
     return {h: harness_summary(g) for h, g in groups.items()} or None
 
 
+def _mean(values: list[int]) -> float | None:
+    return round(sum(values) / len(values), 2) if values else None
+
+
 def compare(items: list[dict[str, Any]], other: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per Harness: pass@1 of both evals, and tool calls on the Tasks both solved."""
-    key = lambda it: (it.get("task_index", it["index"]), it.get("harness"))  # noqa: E731
-    theirs = {key(it): it for it in other}
+    """Per Harness, over the cells both evals ran (same Task, same Harness): pass@1 of each,
+    and tool calls on the Tasks both solved."""
+    theirs = {_cell_key(it): it for it in other}
     out: dict[str, Any] = {}
-    for h in sorted({it.get("harness") or "" for it in items + other}):
-        mine = [it for it in items if (it.get("harness") or "") == h]
-        their = [it for it in other if (it.get("harness") or "") == h]
-        both = [
-            (it, theirs[key(it)])
-            for it in mine
-            if key(it) in theirs and solved(it) and solved(theirs[key(it)])
+    for h in sorted({_cell_key(it)[1] for it in items}):
+        pairs = [
+            (it, theirs[_cell_key(it)])
+            for it in items
+            if _cell_key(it)[1] == h and _cell_key(it) in theirs
         ]
-        pairs = [(tool_calls_of(a), tool_calls_of(b)) for a, b in both]
-        pairs = [(a, b) for a, b in pairs if a is not None and b is not None]
-        a_mean = round(sum(a for a, _ in pairs) / len(pairs), 2) if pairs else None
-        b_mean = round(sum(b for _, b in pairs) / len(pairs), 2) if pairs else None
+        both = [(a, b) for a, b in pairs if solved(a) and solved(b)]
+        calls = [(tool_calls_of(a), tool_calls_of(b)) for a, b in both]
+        calls = [(a, b) for a, b in calls if a is not None and b is not None]
+        mine_mean, their_mean = _mean([a for a, _ in calls]), _mean([b for _, b in calls])
         out[h] = {
-            "pass_at_1": harness_summary(mine)["pass_at_1"],
-            "other_pass_at_1": harness_summary(their)["pass_at_1"],
+            "matched": len(pairs),
+            "pass_at_1": harness_summary([a for a, _ in pairs])["pass_at_1"],
+            "other_pass_at_1": harness_summary([b for _, b in pairs])["pass_at_1"],
             "both_solved": len(both),
-            "mean_tool_calls": a_mean,
-            "other_mean_tool_calls": b_mean,
-            "tool_call_change": round(a_mean / b_mean - 1, 4)
-            if a_mean is not None and b_mean
+            "mean_tool_calls": mine_mean,
+            "other_mean_tool_calls": their_mean,
+            "tool_call_change": round(mine_mean / their_mean - 1, 4)
+            if mine_mean is not None and their_mean
             else None,
         }
     return out
@@ -337,7 +353,7 @@ def row_view(item: dict[str, Any]) -> dict[str, Any]:
     elapsed = item.get("elapsed")
     return {
         "index": item["index"],
-        "task_index": item.get("task_index", item["index"]),
+        "task_index": task_index_of(item),
         "harness": item.get("harness"),
         "state": sample_state(item),
         "reward": reward_of(result),
@@ -358,8 +374,8 @@ def list_samples(eval_id: str, status: str = "all", offset: int = 0, limit: int 
     counts = {s: sum(1 for r in rows if r["state"] == s) for s in STATES}
     if status == "failed":
         rows = [r for r in rows if r["state"] in FAILED]
-    elif status == "truncated":
-        rows = [r for r in rows if r["state"] == "truncated"]
+    elif status in ("truncated", "unscored"):
+        rows = [r for r in rows if r["state"] == status]
     limit = max(1, min(limit, PAGE_MAX))
     return {
         "total": len(rows),
@@ -414,7 +430,7 @@ def sample_detail(eval_id: str, index: int) -> dict[str, Any]:
     }
     return {
         **row_view(item),
-        "input": task_input(ev["dataset_id"], ev["split"], item.get("task_index", index)),
+        "input": task_input(ev["dataset_id"], ev["split"], task_index_of(item)),
         "messages": messages,
         "messages_truncated": more,
         "traceback": _clip(redact(tb), TRACEBACK_MAX, tail=True)[0] or None,

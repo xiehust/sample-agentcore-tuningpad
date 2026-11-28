@@ -761,18 +761,6 @@
   "evals": {
     "create": "New evaluation",
     "how": "Evaluations run your agent on AgentCore against a served model (base or trained) and average the rewards; failed rollouts count as 0.",
-    "compare": {
-      "title": "Compare",
-      "sub": "Against another eval of the same dataset split, e.g. the base model. Tool calls only on Tasks both solved.",
-      "pick": "Pick an eval",
-      "passThis": "pass@1 (this)",
-      "passOther": "pass@1 (other)",
-      "bothSolved": "Both solved",
-      "toolCalls": "Tool calls (this / other)",
-      "change": "Tool calls change",
-      "hint": "Pick an eval to compare with.",
-      "none": "No other finished eval of this dataset split."
-    },
     "empty": "No evaluations yet.",
     "data": "Dataset",
     "meanReward": "Mean reward",
@@ -830,7 +818,8 @@
       "noReason": "No stop reason was recorded.",
       "truncatedHint": "The model hit its token budget before finishing; the sample scores 0.",
       "showTraceback": "Show traceback",
-      "hideTraceback": "Hide traceback"
+      "hideTraceback": "Hide traceback",
+      "filterUnscored": "Unscored"
     },
     "observe": "Traces",
     "observeLabel": "Record traces (waterfall)",
@@ -894,10 +883,25 @@
     "harnessesHint": "Every Task runs once under each picked harness; the limit counts Tasks",
     "matrix": {
       "title": "By harness",
-      "sub": "pass@1 leaves out cells whose verifier produced no result; failed cells count as unsolved",
+      "sub": "pass@1 = solved / graded cells; unscored and failed cells were never graded and are shown apart",
       "solved": "Solved",
-      "meanToolCalls": "Tool calls (mean, scored)"
-    }
+      "meanToolCalls": "Tool calls (mean, scored)",
+      "passAt1": "pass@1"
+    },
+    "comparison": {
+      "title": "Compare",
+      "sub": "Against another eval of the same dataset split, e.g. the base model, over the cells both ran. Tool calls only on Tasks both solved.",
+      "pick": "Pick an eval",
+      "passThis": "pass@1 (this)",
+      "passOther": "pass@1 (other)",
+      "bothSolved": "Both solved",
+      "toolCalls": "Tool calls (this / other)",
+      "change": "Tool calls change",
+      "hint": "Pick an eval to compare with.",
+      "none": "No other finished eval of this dataset split.",
+      "matched": "Cells in both"
+    },
+    "compare": "Results"
   },
   "overview": {
     "clusters": "Clusters",

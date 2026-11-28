@@ -323,13 +323,15 @@ def test_summary_reports_pass_at_1_and_tool_calls_per_harness():
         "scored": 2,
         "unscored": 0,
         "failed": 0,
+        "graded": 2,
         "solved": 1,
         "pass_at_1": 0.5,
         "mean_tool_calls": 5.0,
     }
-    # unscored cells leave the denominator; failed ones count as unsolved
+    # cells never graded (unscored, or the invocation failed) leave the denominator
     assert by["opencode"]["pass_at_1"] == 0.0 and by["opencode"]["n"] == 3
     assert by["opencode"]["unscored"] == 1 and by["opencode"]["failed"] == 1
+    assert by["opencode"]["graded"] == 1
 
 
 def test_a_single_harness_summary_matches_the_plain_eval():
@@ -439,3 +441,26 @@ def test_compare_endpoint_needs_the_same_tasks(client, eval_env):
     d = client.get("/api/evals/ev-1/compare/ev-2").json()
     assert d["by_harness"]["opencode"]["tool_call_change"] == -0.5
     assert client.get("/api/evals/ev-1/compare/ev-3").json()["code"] == "eval.not_comparable"
+
+
+def test_compare_uses_only_cells_both_evals_ran():
+    """Different limits or Harness sets must not compare different Tasks."""
+    mine = [_cell(0, 0, "opencode", 1.0, 2), _cell(1, 1, "opencode", 1.0, 2)]
+    other = [_cell(0, 0, "opencode", 0.0, 2)]  # the other eval ran Task 0 only
+    oc = esvc.compare(mine, other)["opencode"]
+    assert (oc["matched"], oc["pass_at_1"], oc["other_pass_at_1"]) == (1, 1.0, 0.0)
+
+
+def test_tool_calls_fall_back_to_the_transcript():
+    item = dict(ITEMS[0])  # no metrics.tool_calls; two toolUse blocks in its messages
+    assert esvc.tool_calls_of(item) == 2
+
+
+def test_samples_can_be_filtered_to_unscored(client, eval_env):
+    cells = [
+        _cell(0, 0, "opencode", 1.0, 2),
+        _cell(1, 1, "opencode", None, 1, stop="verifier_no_result"),
+    ]
+    esvc.results_path("ev-1").write_text("\n".join(json.dumps(c) for c in cells))
+    d = client.get("/api/evals/ev-1/samples?status=unscored").json()
+    assert [r["index"] for r in d["samples"]] == [1]

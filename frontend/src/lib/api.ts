@@ -770,6 +770,7 @@ export interface HarnessEvalSummary {
   scored: number;
   unscored: number;
   failed: number;
+  graded: number;
   solved: number;
   pass_at_1: number | null;
   mean_tool_calls: number | null;
@@ -777,6 +778,7 @@ export interface HarnessEvalSummary {
 
 /** This eval next to another of the same Tasks; tool calls only on Tasks both solved. */
 export interface HarnessComparison {
+  matched: number;
   pass_at_1: number | null;
   other_pass_at_1: number | null;
   both_solved: number;
@@ -820,7 +822,7 @@ export interface CreateEvalBody {
 
 /** Per-sample outcome: `scored` has a reward; a 500 from the agent is `acr_failed`, not scored. */
 export type EvalSampleState = "scored" | "truncated" | "acr_failed" | "invoke_failed" | "unscored";
-export type EvalSampleFilter = "all" | "failed" | "truncated";
+export type EvalSampleFilter = "all" | "failed" | "truncated" | "unscored";
 
 export interface EvalSampleRow {
   index: number;
@@ -924,7 +926,7 @@ export const servingApi = {
   evalSamples: (id: string, opts: { status?: EvalSampleFilter; offset?: number; limit?: number } = {}) =>
     get<EvalSamples>(`/api/evals/${encodeURIComponent(id)}/samples?${q(opts)}`),
   compareEvals: (id: string, otherId: string) =>
-    get<{ eval_id: string; other_id: string; by_harness: Record<string, HarnessComparison> }>(`/api/evals/${id}/compare/${otherId}`),
+    get<{ eval_id: string; other_id: string; by_harness: Record<string, HarnessComparison> }>(`/api/evals/${encodeURIComponent(id)}/compare/${encodeURIComponent(otherId)}`),
   evalSample: (id: string, index: number) =>
     get<EvalSampleDetail>(`/api/evals/${encodeURIComponent(id)}/samples/${index}`),
   /** `force` skips the backend's 60 s trace cache. */

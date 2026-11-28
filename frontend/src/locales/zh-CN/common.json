@@ -761,18 +761,6 @@
   "evals": {
     "create": "新建评估",
     "how": "评估会在 AgentCore 上让 Agent 调用已部署的模型（基座或训练后）并对奖励取平均；失败的 rollout 记 0 分。",
-    "compare": {
-      "title": "对比",
-      "sub": "与同一数据集 split 上的另一个评测对比，例如 base 模型。工具调用只统计两边都解出的 Task。",
-      "pick": "选择评测",
-      "passThis": "pass@1（本次）",
-      "passOther": "pass@1（对方）",
-      "bothSolved": "两边都解出",
-      "toolCalls": "工具调用（本次 / 对方）",
-      "change": "工具调用变化",
-      "hint": "选择一个评测进行对比。",
-      "none": "这个数据集 split 上没有其他已完成的评测。"
-    },
     "empty": "还没有评估。",
     "data": "数据集",
     "meanReward": "平均奖励",
@@ -830,7 +818,8 @@
       "noReason": "没有记录停止原因。",
       "truncatedHint": "模型在完成前用完了 token 预算，该样本记 0 分。",
       "showTraceback": "显示 traceback",
-      "hideTraceback": "收起 traceback"
+      "hideTraceback": "收起 traceback",
+      "filterUnscored": "未打分"
     },
     "observe": "调用链",
     "observeLabel": "记录调用链（瀑布流）",
@@ -894,10 +883,25 @@
     "harnessesHint": "每个 Task 在每个选中的 Harness 下各跑一次；数量上限按 Task 计",
     "matrix": {
       "title": "按 Harness",
-      "sub": "pass@1 不计 Verifier 没有结果的单元格；失败的单元格算未解出",
+      "sub": "pass@1 = 解出 / 已打分的单元格；未打分和失败的单元格没有被打分，单独列出",
       "solved": "解出",
-      "meanToolCalls": "工具调用（均值，已打分）"
-    }
+      "meanToolCalls": "工具调用（均值，已打分）",
+      "passAt1": "pass@1"
+    },
+    "comparison": {
+      "title": "对比",
+      "sub": "与同一数据集 split 上的另一个评测对比（例如 base 模型），只看两边都跑过的单元格。工具调用只统计两边都解出的 Task。",
+      "pick": "选择评测",
+      "passThis": "pass@1（本次）",
+      "passOther": "pass@1（对方）",
+      "bothSolved": "两边都解出",
+      "toolCalls": "工具调用（本次 / 对方）",
+      "change": "工具调用变化",
+      "hint": "选择一个评测进行对比。",
+      "none": "这个数据集 split 上没有其他已完成的评测。",
+      "matched": "两边都有的单元格"
+    },
+    "compare": "结果"
   },
   "overview": {
     "clusters": "集群",

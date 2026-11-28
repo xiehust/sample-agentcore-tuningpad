@@ -72,9 +72,9 @@ function CompareCard({ ev, evals }: { ev: EvalView; evals: EvalView[] }) {
   const pct = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(0)}%`);
   return (
     <Card
-      title={t("evals.compare.title")}
-      sub={t("evals.compare.sub")}
-      end={<Select value={otherId} onChange={setOtherId} placeholder={t("evals.compare.pick")} options={others.map((e) => ({ value: e.id, label: e.name }))} />}
+      title={t("evals.comparison.title")}
+      sub={t("evals.comparison.sub")}
+      end={<Select value={otherId} onChange={setOtherId} placeholder={t("evals.comparison.pick")} options={others.map((e) => ({ value: e.id, label: e.name }))} />}
       flush
     >
       {otherId && cmp.data ? (
@@ -84,15 +84,16 @@ function CompareCard({ ev, evals }: { ev: EvalView; evals: EvalView[] }) {
           rows={Object.entries(cmp.data.by_harness).map(([h, x]) => ({ h, ...x }))}
           columns={[
             { key: "h", title: t("runs.harnesses"), render: (r) => <span className="tp-mono">{r.h || "—"}</span> },
-            { key: "p", title: t("evals.compare.passThis"), render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
-            { key: "o", title: t("evals.compare.passOther"), render: (r) => num(r.other_pass_at_1, 3) },
-            { key: "b", title: t("evals.compare.bothSolved"), render: (r) => r.both_solved },
-            { key: "tc", title: t("evals.compare.toolCalls"), render: (r) => `${num(r.mean_tool_calls, 1)} / ${num(r.other_mean_tool_calls, 1)}` },
-            { key: "d", title: t("evals.compare.change"), render: (r) => pct(r.tool_call_change) },
+            { key: "p", title: t("evals.comparison.passThis"), render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
+            { key: "o", title: t("evals.comparison.passOther"), render: (r) => num(r.other_pass_at_1, 3) },
+            { key: "m", title: t("evals.comparison.matched"), render: (r) => r.matched },
+            { key: "b", title: t("evals.comparison.bothSolved"), render: (r) => r.both_solved },
+            { key: "tc", title: t("evals.comparison.toolCalls"), render: (r) => `${num(r.mean_tool_calls, 1)} / ${num(r.other_mean_tool_calls, 1)}` },
+            { key: "d", title: t("evals.comparison.change"), render: (r) => pct(r.tool_call_change) },
           ]}
         />
       ) : (
-        <div className="v2-muted" style={{ padding: "12px 24px" }}>{others.length ? t("evals.compare.hint") : t("evals.compare.none")}</div>
+        <div className="v2-muted" style={{ padding: "12px 24px" }}>{others.length ? t("evals.comparison.hint") : t("evals.comparison.none")}</div>
       )}
     </Card>
   );
@@ -166,8 +167,8 @@ export default function EvalDetail({ id }: { id: string }) {
               rows={Object.entries(byHarness).map(([h, s]) => ({ h, ...s }))}
               columns={[
                 { key: "h", title: t("runs.harnesses"), render: (r) => <span className="tp-mono">{r.h}</span> },
-                { key: "p", title: "pass@1", render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
-                { key: "s", title: t("evals.matrix.solved"), render: (r) => `${r.solved}/${r.n - r.unscored}` },
+                { key: "p", title: t("evals.matrix.passAt1"), render: (r) => <b>{num(r.pass_at_1, 3)}</b> },
+                { key: "s", title: t("evals.matrix.solved"), render: (r) => `${r.solved}/${r.graded}` },
                 { key: "tc", title: t("evals.matrix.meanToolCalls"), render: (r) => num(r.mean_tool_calls, 1) },
                 { key: "u", title: t("evals.state.unscored"), render: (r) => r.unscored },
                 { key: "f", title: t("evals.failed"), render: (r) => r.failed },
@@ -187,6 +188,7 @@ export default function EvalDetail({ id }: { id: string }) {
                 { value: "all", label: label("evals.detail.filterAll", all) },
                 { value: "failed", label: label("evals.detail.filterFailed", failed) },
                 { value: "truncated", label: label("evals.detail.filterTruncated", c?.truncated ?? null) },
+                ...(c?.unscored ? [{ value: "unscored" as const, label: label("evals.detail.filterUnscored", c.unscored) }] : []),
               ]}
             />
           }

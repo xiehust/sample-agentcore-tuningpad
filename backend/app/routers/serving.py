@@ -206,7 +206,7 @@ def compare_evals(eval_id: str, other_id: str):
 @evals.get("/{eval_id}/samples")
 def eval_samples(
     eval_id: str,
-    status: str = Query("all", pattern="^(all|failed|truncated)$"),
+    status: str = Query("all", pattern="^(all|failed|truncated|unscored)$"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=esvc.PAGE_MAX),
 ):
