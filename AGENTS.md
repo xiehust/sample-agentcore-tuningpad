@@ -67,3 +67,17 @@ Frontend
 - This tool provisions billable GPU capacity. Do not run anything against a real AWS account (start.py with real credentials, CloudFormation, HyperPod scale-up, CodeBuild) unless the user asks for it. Keep the cost guardrails intact: guardian CronJob, `activeDeadlineSeconds` on RayJobs, explicit cost confirmation before any GPU scale-up.
 - Don't weaken network/auth boundaries: the loopback-only default without `TUNINGPAD_PASSWORD`, gateway (18765) and vLLM (8000) reachable only from the AgentCore SG, `require_registered_sessions`, and IRSA scoping.
 - Never commit `config/tuningpad.yaml`, `data/` or `.run/`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `xiehust/sample-agentcore-tuningpad`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created on demand. See `docs/agents/domain.md`.
