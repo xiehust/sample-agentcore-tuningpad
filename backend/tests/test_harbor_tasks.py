@@ -119,7 +119,9 @@ def test_train_subset_is_stratified_by_difficulty_and_repeatable(hub, stub_aws):
     )
     s3, _ = s3_stub()
     stub_aws({"s3": s3})
-    out = harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, train_n=8, seed=7)
+    out = harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(train_tasks=8, seed=7)
+    )
     tiers = {r["task_dir"]: r["difficulty_tier"] for r in fake.tasks[harbor.SMOL_TRAIN]}
     picked = [r["payload"]["task_id"] for r in out["train"]]
     assert len(picked) == 8
@@ -129,7 +131,9 @@ def test_train_subset_is_stratified_by_difficulty_and_repeatable(hub, stub_aws):
 
     s3_again, _ = s3_stub()
     stub_aws({"s3": s3_again})
-    again = harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, train_n=8, seed=7)
+    again = harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(train_tasks=8, seed=7)
+    )
     assert [r["payload"]["task_id"] for r in again["train"]] == picked
 
 
@@ -145,7 +149,9 @@ def test_rows_point_at_task_and_shared_input_uris(hub, stub_aws):
     )
     s3, stored = s3_stub()
     stub_aws({"s3": s3})
-    out = harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+    out = harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(all_tasks=True)
+    )
     row = next(r for r in out["train"] if r["payload"]["task_id"] == "0004_task")
     base = "s3://bkt/datasets/ds-1/smoldataenvs"
     assert row["payload"] == {
@@ -156,7 +162,7 @@ def test_rows_point_at_task_and_shared_input_uris(hub, stub_aws):
     assert row["prompt"] == [{"role": "user", "content": "Question for 0004_task"}]
     assert "datasets/ds-1/smoldataenvs/tasks/0004_task/tests/grader.py" in stored
     assert "datasets/ds-1/smoldataenvs/tasks/0004_task/environment/Dockerfile" not in stored
-    # the held-out test split is used for in-training validation as well
+    # in-training validation uses the held-out test split (a subset once it is large)
     assert out["val"] == out["test"] and len(out["test"]) == 2
 
 
@@ -172,17 +178,42 @@ def test_each_input_prefix_is_uploaded_once_and_reused_on_rerun(hub, stub_aws):
     )
     s3, stored = s3_stub()
     stub_aws({"s3": s3})
-    harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+    harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(all_tasks=True)
+    )
     assert sorted(fake.downloaded_prefixes) == ["owner__ds0", "owner__ds1", "owner__ds2"]
     uploads = len([c for c in s3.calls if c[0] == "upload_file"])
 
     fake.downloaded_prefixes.clear()
     s3_rerun, _ = s3_stub(stored)
     stub_aws({"s3": s3_rerun})
-    harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+    harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(all_tasks=True)
+    )
     assert fake.downloaded_prefixes == []
     assert not [c for c in s3_rerun.calls if c[0] == "upload_file"]
     assert uploads > 0
+
+
+def test_val_is_a_stratified_subset_of_the_held_out_tests(hub, stub_aws, monkeypatch):
+    monkeypatch.setattr(harbor, "VAL_TASKS", 4)
+    hub(
+        FakeHub(
+            {
+                harbor.SMOL_TRAIN: manifest_rows(2, ["easy"]),
+                harbor.SMOL_TEST: manifest_rows(8, ["easy", "hard"]),
+            },
+            sizes={f"owner__ds{i}": 10 for i in range(3)},
+        )
+    )
+    s3, _ = s3_stub()
+    stub_aws({"s3": s3})
+    out = harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions())
+    test_ids = [r["payload"]["task_id"] for r in out["test"]]
+    val_ids = [r["payload"]["task_id"] for r in out["val"]]
+    assert len(test_ids) == 8 and len(val_ids) == 4 and set(val_ids) <= set(test_ids)
+    # 0000, 0002, ... are easy; 0001, 0003, ... are hard: two of each
+    assert sum(int(v[:4]) % 2 for v in val_ids) == 2
 
 
 def test_an_input_prefix_left_partial_by_a_crash_is_completed_on_rerun(hub, stub_aws):
@@ -199,7 +230,9 @@ def test_an_input_prefix_left_partial_by_a_crash_is_completed_on_rerun(hub, stub
     partial = {"datasets/ds-1/smoldataenvs/inputs/owner__ds0/other.csv": 3}
     s3, stored = s3_stub(partial)
     stub_aws({"s3": s3})
-    harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+    harbor.smoldataenvs_rows(
+        "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(all_tasks=True)
+    )
     assert fake.downloaded_prefixes == ["owner__ds0"]
     assert "datasets/ds-1/smoldataenvs/inputs/owner__ds0/data.csv" in stored
 
@@ -218,7 +251,11 @@ def test_tasks_whose_inputs_exceed_the_cap_are_skipped(hub, stub_aws):
     stub_aws({"s3": s3})
     logs: list[str] = []
     out = harbor.smoldataenvs_rows(
-        "ds-1", "us-east-1", "bkt", logs.append, all_tasks=True, max_input_bytes=1_000
+        "ds-1",
+        "us-east-1",
+        "bkt",
+        logs.append,
+        harbor.SmolImportOptions(all_tasks=True, max_input_bytes=1_000),
     )
     assert {r["payload"]["task_id"] for r in out["train"]} == {
         "0001_task",
@@ -241,7 +278,9 @@ def test_estimate_reports_tasks_and_bytes_without_uploading(hub):
             sizes={"owner__ds0": 5_000, "owner__ds1": 10, "owner__ds2": 20},
         )
     )
-    est = harbor.smoldataenvs_estimate(all_tasks=True, max_input_bytes=1_000)
+    est = harbor.smoldataenvs_estimate(
+        harbor.SmolImportOptions(all_tasks=True, max_input_bytes=1_000)
+    )
     assert est == {"train": 4, "test": 2, "skipped": 3, "input_bytes": 30}
 
 
@@ -259,7 +298,9 @@ def test_tasks_with_different_environment_images_are_refused(hub, stub_aws):
     s3, _ = s3_stub()
     stub_aws({"s3": s3})
     with pytest.raises(AppError) as e:
-        harbor.smoldataenvs_rows("ds-1", "us-east-1", "bkt", print, all_tasks=True)
+        harbor.smoldataenvs_rows(
+            "ds-1", "us-east-1", "bkt", print, harbor.SmolImportOptions(all_tasks=True)
+        )
     assert e.value.code == "dataset.harbor_mixed_images"
     assert not [c for c in s3.calls if c[0] == "upload_file"]
 

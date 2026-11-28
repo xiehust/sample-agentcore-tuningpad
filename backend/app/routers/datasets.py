@@ -68,14 +68,10 @@ class BuiltinBody(BaseModel):
     max_input_gb: float | None = Field(None, gt=0, le=100)
 
 
-def _smol_args(body: BuiltinBody) -> dict[str, Any]:
-    return {
-        "train_n": body.train_tasks or harbor.DEFAULT_TRAIN_TASKS,
-        "all_tasks": body.all_tasks,
-        "max_input_bytes": int(body.max_input_gb * 1024**3)
-        if body.max_input_gb
-        else harbor.DEFAULT_MAX_INPUT_BYTES,
-    }
+def _smol_options(body: BuiltinBody) -> harbor.SmolImportOptions:
+    return harbor.SmolImportOptions.from_request(
+        body.train_tasks, body.all_tasks, body.max_input_gb
+    )
 
 
 def _builtin_kind(template_id: str) -> str:
@@ -88,12 +84,9 @@ def _builtin_kind(template_id: str) -> str:
 @router.post("/builtin/estimate")
 def builtin_estimate(body: BuiltinBody):
     """Tasks selected and input bytes transferred by an import with these settings."""
-    if _builtin_kind(body.template_id) != "smoldataenvs":
+    if _builtin_kind(body.template_id) != harbor.SMOLDATAENVS:
         raise AppError("dataset.no_estimate", "only SmolDataEnvs imports have an estimate")
-    a = _smol_args(body)
-    return harbor.smoldataenvs_estimate(
-        train_n=a["train_n"], all_tasks=a["all_tasks"], max_input_bytes=a["max_input_bytes"]
-    )
+    return harbor.smoldataenvs_estimate(_smol_options(body))
 
 
 @router.post("/builtin")
@@ -121,13 +114,8 @@ def builtin(body: BuiltinBody):
             )
         )
     job_payload: dict[str, Any] = {"builtin": kind, "limit": body.limit}
-    if kind == "smoldataenvs":
-        a = _smol_args(body)
-        job_payload |= {
-            "train_tasks": a["train_n"],
-            "all_tasks": a["all_tasks"],
-            "max_input_bytes": a["max_input_bytes"],
-        }
+    if kind == harbor.SMOLDATAENVS:
+        job_payload["smol"] = _smol_options(body).to_job()
     job = get_engine().start("dataset.builtin", did, job_payload)
     return {"id": did, "job_id": job}
 

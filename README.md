@@ -72,7 +72,7 @@ Configuration goes in `config/tuningpad.yaml` (see `config/tuningpad.example.yam
 
 The single source declaration is `backend/pyproject.toml`: Git URL
 `https://github.com/xiehust/agentcore-rl-toolkit.git` at full commit
-`e9c5e9e4e4b85ccb9e1e5bab7713f6ea609ec8d8`: awslabs main `a187900` plus two opt-in gateway
+`82d339f8da73ed3b71cf5211caa0a946080e2566`: awslabs main `a187900` plus two opt-in gateway
 flags pending upstream: the `require_registered_sessions` guard
 ([awslabs/agentcore-rl-toolkit#250](https://github.com/awslabs/agentcore-rl-toolkit/pull/250))
 and `override_client_sampling`, which makes the gateway ignore a harness's own

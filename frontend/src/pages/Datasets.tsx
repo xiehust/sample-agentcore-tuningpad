@@ -64,6 +64,12 @@ function DatasetList() {
   );
 }
 
+// SmolDataEnvs import defaults; the backend applies the same ones (services/harbor.py)
+const SMOLDATAENVS = "smoldataenvs";
+const SMOL_DEFAULT_TRAIN_TASKS = 1000;
+const SMOL_DEFAULT_MAX_INPUT_GB = 1;
+const SMOL_TRAIN_TASKS_MAX = 5000;
+
 function CreateDataset() {
   const { t } = useTranslation();
   const loc = useLocalized();
@@ -75,9 +81,9 @@ function CreateDataset() {
   const [name, setName] = useState("");
   const [region, setRegion] = useState("us-east-1");
   const [limit, setLimit] = useState("");
-  const [trainTasks, setTrainTasks] = useState("1000");
+  const [trainTasks, setTrainTasks] = useState(String(SMOL_DEFAULT_TRAIN_TASKS));
   const [allTasks, setAllTasks] = useState(false);
-  const [maxInputGb, setMaxInputGb] = useState("1");
+  const [maxInputGb, setMaxInputGb] = useState(String(SMOL_DEFAULT_MAX_INPUT_GB));
   const [estimate, setEstimate] = useState<BuiltinEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [train, setTrain] = useState<File | null>(null);
@@ -95,12 +101,12 @@ function CreateDataset() {
     name: name || undefined,
     region,
     limit: limit ? Number(limit) : null,
-    ...(builtinKind === "smoldataenvs"
+    ...(builtinKind === SMOLDATAENVS
       ? { train_tasks: trainTasks ? Number(trainTasks) : null, all_tasks: allTasks, max_input_gb: maxInputGb ? Number(maxInputGb) : null }
       : {}),
   });
   // SmolDataEnvs imports move GBs: show the size for the current options before allowing one
-  const needsEstimate = mode === "builtin" && builtinKind === "smoldataenvs" && !estimate;
+  const needsEstimate = mode === "builtin" && builtinKind === SMOLDATAENVS && !estimate;
   const runEstimate = async () => {
     setEstimating(true);
     try {
@@ -171,11 +177,11 @@ function CreateDataset() {
                 <OptionCard key={x.id} title={loc(x.name)} desc={t(`datasets.builtin_${x.dataset?.builtin}`)} on={templateId === x.id} onClick={() => setTemplateId(x.id)} />
               ))}
             </div>
-            {builtinKind === "smoldataenvs" && (
+            {builtinKind === SMOLDATAENVS && (
               <>
                 <div className="v2-form cols-2" style={{ marginTop: 16 }}>
                   <Field label={t("datasets.smolTrainTasks")} hint={t("datasets.smolTrainTasksHint")}>
-                    <input className="v2-input" type="number" min={1} max={5000} value={trainTasks} disabled={allTasks} onChange={(e) => { setTrainTasks(e.target.value); setEstimate(null); }} />
+                    <input className="v2-input" type="number" min={1} max={SMOL_TRAIN_TASKS_MAX} value={trainTasks} disabled={allTasks} onChange={(e) => { setTrainTasks(e.target.value); setEstimate(null); }} />
                   </Field>
                   <Field label={t("datasets.smolMaxInput")} hint={t("datasets.smolMaxInputHint")}>
                     <input className="v2-input" type="number" min={0.1} step={0.1} value={maxInputGb} onChange={(e) => { setMaxInputGb(e.target.value); setEstimate(null); }} />

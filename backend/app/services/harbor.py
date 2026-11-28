@@ -19,6 +19,7 @@ import tempfile
 import tomllib
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ import pandas as pd
 from ..core import aws
 from ..core.errors import AppError
 
+SMOLDATAENVS = "smoldataenvs"  # the template's `dataset.builtin` kind
 SMOL_TRAIN = "FineEnvs/SmolDataEnvs-harbor-train"
 SMOL_TEST = "FineEnvs/SmolDataEnvs-harbor-test"
 # Pinned dataset revisions: the same import always selects the same Tasks.
@@ -34,9 +36,13 @@ SMOL_REVISIONS = {
     SMOL_TRAIN: "588744be728257abfb8d4984ec8fab2acbd1f7e1",
     SMOL_TEST: "607665fff01d8fd80936470e57b73d8528753532",
 }
+SMOL_SPLIT = {SMOL_TRAIN: "train", SMOL_TEST: "test"}
 SMOL_BUCKET = "AdithyaSK/jupyter-agent-kaggle-all"
 DEFAULT_TRAIN_TASKS = 1000
-DEFAULT_MAX_INPUT_BYTES = 1 << 30
+DEFAULT_MAX_INPUT_GB = 1.0
+# In-training validation runs every Task under val_n samples: a stratified subset of the
+# held-out test set keeps it cheap (GSM8K does the same with 200 questions).
+VAL_TASKS = 100
 # Files the Agent needs; the environment/ directory is baked into the Agent image.
 TASK_FILES = ("instruction.md", "task.toml", "tests/*")
 
@@ -118,10 +124,39 @@ def require_shared_image(tasks: Iterable[dict[str, Any]]) -> str:
     return images.pop()
 
 
-# ---------------- SmolDataEnvs selection ----------------
+# ---------------- SmolDataEnvs options and selection ----------------
 
 
-def _prefix(kaggle: str) -> str:
+@dataclass(frozen=True)
+class SmolImportOptions:
+    """What a SmolDataEnvs import selects: a stratified train subset (or all of it), Tasks
+    with inputs no larger than the cap, and the held-out test set."""
+
+    train_tasks: int = DEFAULT_TRAIN_TASKS
+    all_tasks: bool = False
+    max_input_bytes: int = int(DEFAULT_MAX_INPUT_GB * 1024**3)
+    seed: int = 0
+
+    @classmethod
+    def from_request(
+        cls, train_tasks: int | None, all_tasks: bool, max_input_gb: float | None
+    ) -> SmolImportOptions:
+        return cls(
+            train_tasks=train_tasks or DEFAULT_TRAIN_TASKS,
+            all_tasks=all_tasks,
+            max_input_bytes=int((max_input_gb or DEFAULT_MAX_INPUT_GB) * 1024**3),
+        )
+
+    def to_job(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_job(cls, data: dict[str, Any]) -> SmolImportOptions:
+        return cls(**data)
+
+
+def _bucket_prefix(kaggle: str) -> str:
+    """The HF Bucket prefix holding a Kaggle dataset's files (`owner/name` → `owner__name`)."""
     return kaggle.replace("/", "__")
 
 
@@ -145,23 +180,24 @@ def _stratified(rows: list[dict[str, Any]], n: int, seed: int) -> list[dict[str,
     return [r for r in rows if r["task_dir"] in picked]
 
 
-def _plan(train_n: int, all_tasks: bool, max_input_bytes: int, seed: int) -> dict[str, Any]:
+def _select_tasks(opts: SmolImportOptions) -> dict[str, Any]:
+    """Manifest rows chosen per repo, how many were skipped for size, and input bytes."""
     hub = _hub()
     chosen = {}
-    for repo in (SMOL_TRAIN, SMOL_TEST):
+    for repo in SMOL_SPLIT:
         rows = hub.manifest(repo, SMOL_REVISIONS[repo]).to_dict("records")
-        if repo == SMOL_TRAIN and not all_tasks:
-            rows = _stratified(rows, train_n, seed)
+        if repo == SMOL_TRAIN and not opts.all_tasks:
+            rows = _stratified(rows, opts.train_tasks, opts.seed)
         chosen[repo] = rows
     sizes = hub.prefix_sizes(
-        sorted({_prefix(r["kaggle"]) for rows in chosen.values() for r in rows})
+        sorted({_bucket_prefix(r["kaggle"]) for rows in chosen.values() for r in rows})
     )
     skipped = 0
     for repo, rows in chosen.items():
-        kept = [r for r in rows if sizes[_prefix(r["kaggle"])] <= max_input_bytes]
+        kept = [r for r in rows if sizes[_bucket_prefix(r["kaggle"])] <= opts.max_input_bytes]
         skipped += len(rows) - len(kept)
         chosen[repo] = kept
-    used = {_prefix(r["kaggle"]) for rows in chosen.values() for r in rows}
+    used = {_bucket_prefix(r["kaggle"]) for rows in chosen.values() for r in rows}
     return {
         "tasks": chosen,
         "skipped": skipped,
@@ -169,27 +205,22 @@ def _plan(train_n: int, all_tasks: bool, max_input_bytes: int, seed: int) -> dic
     }
 
 
-def smoldataenvs_estimate(
-    *,
-    train_n: int = DEFAULT_TRAIN_TASKS,
-    all_tasks: bool = False,
-    max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES,
-    seed: int = 0,
-) -> dict[str, int]:
-    """What an import with these settings selects and transfers; uploads nothing."""
-    plan = _plan(train_n, all_tasks, max_input_bytes, seed)
+def smoldataenvs_estimate(opts: SmolImportOptions) -> dict[str, int]:
+    """What an import with these options selects and transfers; uploads nothing."""
+    sel = _select_tasks(opts)
     return {
-        "train": len(plan["tasks"][SMOL_TRAIN]),
-        "test": len(plan["tasks"][SMOL_TEST]),
-        "skipped": plan["skipped"],
-        "input_bytes": plan["input_bytes"],
+        "train": len(sel["tasks"][SMOL_TRAIN]),
+        "test": len(sel["tasks"][SMOL_TEST]),
+        "skipped": sel["skipped"],
+        "input_bytes": sel["input_bytes"],
     }
 
 
 # ---------------- SmolDataEnvs import ----------------
 
 
-def _existing(s3, bucket: str, prefix: str) -> dict[str, int]:
+def _object_sizes(s3, bucket: str, prefix: str) -> dict[str, int]:
+    """Key → size of every S3 object under `prefix`."""
     out: dict[str, int] = {}
     kw: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
     while True:
@@ -203,7 +234,7 @@ def _existing(s3, bucket: str, prefix: str) -> dict[str, int]:
 def _upload_tree(s3, local: Path, bucket: str, prefix: str) -> int:
     """Upload every file under `local` to `prefix`, skipping objects already there with the
     same size. Returns the number of files uploaded."""
-    have = _existing(s3, bucket, prefix)
+    have = _object_sizes(s3, bucket, prefix)
     sent = 0
     for f in sorted(p for p in local.rglob("*") if p.is_file() and not p.is_symlink()):
         key = f"{prefix}{f.relative_to(local).as_posix()}"
@@ -214,30 +245,31 @@ def _upload_tree(s3, local: Path, bucket: str, prefix: str) -> int:
     return sent
 
 
+def _upload_one(s3, local: Path, bucket: str, key: str) -> None:
+    if _object_sizes(s3, bucket, key).get(key) != local.stat().st_size:
+        s3.upload_file(str(local), bucket, key)
+
+
 def smoldataenvs_rows(
     dataset_id: str,
     region: str,
     bucket: str,
     log: Callable[[str], Any],
-    *,
-    train_n: int = DEFAULT_TRAIN_TASKS,
-    all_tasks: bool = False,
-    max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES,
-    seed: int = 0,
+    opts: SmolImportOptions,
 ) -> dict[str, Any]:
     """Stage the selected Tasks and their input files in S3 and return payload rows:
-    train, test (held out) and val (= test). Idempotent: a re-run uploads only what is
-    missing, and input prefixes already in S3 are not downloaded again."""
-    plan = _plan(train_n, all_tasks, max_input_bytes, seed)
-    if plan["skipped"]:
-        log(f"skipped {plan['skipped']} tasks whose input files exceed {max_input_bytes} bytes")
+    train, test (held out) and val (a stratified subset of test). Idempotent: a re-run
+    uploads only what is missing, and fully staged input prefixes are not downloaded again."""
+    sel = _select_tasks(opts)
+    if sel["skipped"]:
+        log(f"skipped {sel['skipped']} tasks whose input files exceed {opts.max_input_bytes} bytes")
     hub = _hub()
-    base = f"datasets/{dataset_id}/smoldataenvs"
+    base = f"datasets/{dataset_id}/{SMOLDATAENVS}"
     s3 = aws.client("s3", region)
-    out: dict[str, Any] = {"skipped": plan["skipped"]}
+    out: dict[str, Any] = {"skipped": sel["skipped"]}
     with tempfile.TemporaryDirectory(prefix="smoldataenvs-") as tmp:
         staged: dict[str, list[tuple[dict[str, Any], Path]]] = {}
-        for repo, rows in plan["tasks"].items():
+        for repo, rows in sel["tasks"].items():
             root = hub.task_dirs(
                 repo, SMOL_REVISIONS[repo], [r["task_dir"] for r in rows], Path(tmp) / repo
             )
@@ -245,7 +277,7 @@ def smoldataenvs_rows(
         image = require_shared_image(t for items in staged.values() for t, _ in items)
         log(f"environment image: {image}")
         for repo, items in staged.items():
-            want = {r["task_dir"]: _prefix(r["kaggle"]) for r in plan["tasks"][repo]}
+            want = {r["task_dir"]: _bucket_prefix(r["kaggle"]) for r in sel["tasks"][repo]}
             for t, _ in items:
                 if t["env"].get("HF_BUCKET") != SMOL_BUCKET or (
                     t["env"].get("BUCKET_PREFIX") != want[t["name"]]
@@ -258,20 +290,19 @@ def smoldataenvs_rows(
         prefixes = sorted(
             {t["env"].get("BUCKET_PREFIX") for items in staged.values() for t, _ in items}
         )
-        for n, p in enumerate(prefixes, 1):
-            key = f"{base}/inputs/{p}/"
+        for n, prefix in enumerate(prefixes, 1):
             # Written only after the whole prefix is uploaded, so a crash mid-prefix is
             # resumed; kept outside inputs/ so it never lands in the Task's input dir.
-            done = f"{base}/inputs-complete/{p}"
-            if _existing(s3, bucket, done):
+            done = f"{base}/inputs-complete/{prefix}"
+            if _object_sizes(s3, bucket, done):
                 continue
-            local = Path(tmp) / "inputs" / p
-            hub.download_prefix(p, local)
-            _upload_tree(s3, local, bucket, key)
+            local = Path(tmp) / "inputs" / prefix
+            hub.download_prefix(prefix, local)
+            _upload_tree(s3, local, bucket, f"{base}/inputs/{prefix}/")
             s3.put_object(Bucket=bucket, Key=done, Body=b"")
             for f in sorted(local.rglob("*"), reverse=True):
                 f.unlink() if f.is_file() else f.rmdir()
-            log(f"inputs {n}/{len(prefixes)}: {p}")
+            log(f"inputs {n}/{len(prefixes)}: {prefix}")
 
         for repo, items in staged.items():
             rows = []
@@ -294,12 +325,8 @@ def smoldataenvs_rows(
                         "prompt": [{"role": "user", "content": task["instruction"]}],
                     }
                 )
-            out["train" if repo == SMOL_TRAIN else "test"] = rows
-            log(f"{'train' if repo == SMOL_TRAIN else 'test'}: {len(rows)} tasks staged")
-    out["val"] = out["test"]
+            out[SMOL_SPLIT[repo]] = rows
+            log(f"{SMOL_SPLIT[repo]}: {len(rows)} tasks staged")
+    val_ids = {r["task_dir"] for r in _stratified(sel["tasks"][SMOL_TEST], VAL_TASKS, opts.seed)}
+    out["val"] = [r for r in out["test"] if r["payload"]["task_id"] in val_ids]
     return out
-
-
-def _upload_one(s3, local: Path, bucket: str, key: str) -> None:
-    if _existing(s3, bucket, key).get(key) != local.stat().st_size:
-        s3.upload_file(str(local), bucket, key)

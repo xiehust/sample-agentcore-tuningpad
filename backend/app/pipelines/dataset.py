@@ -88,18 +88,10 @@ def stage_builtin(ctx: StageContext) -> None:
             d["id"], d["region"], res["bucket"], ctx.log, limit=ctx.payload.get("limit")
         )
         splits = {"train": data["train"], "val": data["val"]}
-    elif kind == "smoldataenvs":
+    elif kind == harbor.SMOLDATAENVS:
         res = proj.require_region(d["region"])
-        p = ctx.payload
-        data = harbor.smoldataenvs_rows(
-            d["id"],
-            d["region"],
-            res["bucket"],
-            ctx.log,
-            train_n=p.get("train_tasks") or harbor.DEFAULT_TRAIN_TASKS,
-            all_tasks=bool(p.get("all_tasks")),
-            max_input_bytes=p.get("max_input_bytes") or harbor.DEFAULT_MAX_INPUT_BYTES,
-        )
+        opts = harbor.SmolImportOptions.from_job(ctx.payload["smol"])
+        data = harbor.smoldataenvs_rows(d["id"], d["region"], res["bucket"], ctx.log, opts)
         splits = {"train": data["train"], "val": data["val"], "test": data["test"]}
         extra["skipped"] = data["skipped"]
     else:
