@@ -646,7 +646,7 @@ function RunDetail({ id }: { id: string }) {
                 { label: t("clusters.capacity"), value: run.compute.training_plan_arn ? <span className="tp-mono">{run.compute.training_plan_arn.split("/").pop()}</span> : t(`clusters.capacity_${run.compute.capacity ?? "on_demand"}`) },
                 { label: "RayJob", value: <span className="tp-mono">{run.rayjob_name ?? "—"}</span> },
                 ...(run.spec.agent_loop ? [{ label: t("runs.agentLoop"), value: <span className="tp-mono">{JSON.stringify(run.spec.agent_loop)}</span> }] : []),
-                ...(run.spec.harnesses ? [{ label: t("runs.harnesses"), value: <span className="tp-mono">{`${run.spec.harnesses.names.join(", ")} · seed ${run.spec.harnesses.seed}`}</span> }] : []),
+                ...(run.spec.harnesses ? [{ label: t("runs.harnesses"), value: <span className="tp-mono">{t("runs.harnessesWithSeed", { names: run.spec.harnesses.names.join(", "), seed: run.spec.harnesses.seed })}</span> }] : []),
                 { label: t("runs.retries"), value: `${run.retries} / ${run.compute.max_retries}` },
                 { label: t("common.created"), value: dateTime(run.created_at) },
               ]}

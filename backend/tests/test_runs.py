@@ -2,7 +2,6 @@ import collections
 import json
 import time
 
-import pandas as pd
 import pytest
 import yaml
 
@@ -1638,17 +1637,28 @@ def harness_agent(run_env):
 
 
 def _s3_with(dataset_rows: dict[str, list[dict]], uploads: dict):
+    """S3 stub for run data: datasets to download, uploads recorded (and then present)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from botocore.exceptions import ClientError
+
     def download_file(_args):
         bucket, key, dest = _args
-        pd.DataFrame(dataset_rows[f"s3://{bucket}/{key}"]).to_parquet(dest, index=False)
+        uri = f"s3://{bucket}/{key}"
+        pq.write_table(pa.Table.from_pylist(uploads.get(uri) or dataset_rows[uri]), dest)
 
     def upload_file(_args):
         src, bucket, key = _args
-        uploads[f"s3://{bucket}/{key}"] = pd.read_parquet(src).to_dict("records")
+        uploads[f"s3://{bucket}/{key}"] = pq.read_table(src).to_pylist()
+
+    def head_object(Bucket, Key):
+        if f"s3://{Bucket}/{Key}" not in uploads:
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        return {}
 
     from tests.conftest import StubClient
 
-    return StubClient(download_file=download_file, upload_file=upload_file)
+    return StubClient(download_file=download_file, upload_file=upload_file, head_object=head_object)
 
 
 def test_preview_rejects_harnesses_the_agent_does_not_have(
@@ -1706,3 +1716,40 @@ def test_runs_without_harnesses_use_the_dataset_as_is(run_env):
     assert job.status == "succeeded", job.error
     cm = next(m for m in run_env["applied"] if m["kind"] == "ConfigMap")
     assert "s3://b/t" in cm["data"]["train.sh"]
+
+
+def test_payload_types_survive_the_run_data_copy(harness_agent, stub_aws):
+    """Optional integer fields must stay integers (pandas would turn them into floats)."""
+    uploads: dict = {}
+    data = [{"payload": {"task_id": "a", "n": 3}}, {"payload": {"task_id": "b"}}]
+    stub_aws({"s3": _s3_with({"s3://b/t": data}, uploads)})
+    out = ha.stage_run_data(
+        "run-1", "us-east-1", "b", {"train": "s3://b/t"}, {"names": NAMES, "seed": 0}
+    )
+    rows = uploads[out["train"]]
+    assert rows[0]["payload"]["n"] == 3 and isinstance(rows[0]["payload"]["n"], int)
+    assert rows[1]["payload"]["n"] is None
+
+
+def test_a_retry_reuses_the_run_data_written_by_the_first_attempt(harness_agent, stub_aws):
+    uploads: dict = {}
+    source = {"s3://b/t": _rows(4)}
+    stub_aws({"s3": _s3_with(source, uploads)})
+    first = ha.stage_run_data(
+        "run-1", "us-east-1", "b", {"train": "s3://b/t"}, {"names": NAMES, "seed": 0}
+    )
+    written = uploads[first["train"]]
+    source["s3://b/t"] = _rows(9)  # the source dataset changed since
+    again = ha.stage_run_data(
+        "run-1", "us-east-1", "b", {"train": "s3://b/t"}, {"names": NAMES, "seed": 0}
+    )
+    assert again == first and uploads[first["train"]] == written
+
+
+def test_a_dataset_may_name_any_installed_harness(client, mode_request, harness_agent, stub_aws):
+    """The check is against the Agent's Harnesses, not only those picked for this run."""
+    stub_aws(
+        {"s3": _s3_with({"s3://b/t": _rows(4, harness="mini_swe_agent"), "s3://b/v": _rows(2)}, {})}
+    )
+    mode_request["harnesses"] = ["claude_code"]
+    assert client.post("/api/runs/preview", json=mode_request).status_code == 200

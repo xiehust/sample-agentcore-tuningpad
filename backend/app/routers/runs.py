@@ -98,7 +98,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
 
         agent = s.get(Agent, rt.agent_id)
         template_id = agent.template_id if agent else None
-        installed = ((agent.config or {}).get("params") or {}).get("harnesses") if agent else None
+        installed = harness_assign.installed(agent.config if agent else None)
         tr = s.get(Dataset, body.train_dataset_id)
         if not tr or tr.status != "ready":
             raise AppError("run.bad_dataset", "training dataset is not ready")
@@ -112,7 +112,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         uris = svc.dataset_uris(tr.splits, va.splits if va else None, body.val_split)
     harnesses = harness_assign.choose(installed, body.harnesses)
     if harnesses:
-        harness_assign.validate_datasets(region, uris, harnesses)
+        harness_assign.validate_datasets(region, uris, installed)
     m = models.check_model(body.model_id)
     if not m.compatible:
         raise AppError("run.model_incompatible", m.reason or "model not supported by the gateway")
@@ -160,9 +160,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         "plan": p,
         "params": params,
         "agent_loop": agent_loop,
-        "harnesses": {"names": harnesses, "seed": harness_assign.DEFAULT_SEED}
-        if harnesses
-        else None,
+        "harnesses": harness_assign.run_spec(harnesses),
         "model": m.to_dict(),
     }
 
