@@ -15,12 +15,10 @@ import {
   runApi,
   servingApi,
   type CreateRunBody,
-  type Plan,
   type RunCompute,
-  type RunEstimate,
+  type RunPreview,
   type RunView,
   type TrainingMode,
-  type TrainingPlan,
 } from "../lib/api";
 import { dateTime, duration, money, num } from "../lib/format";
 import { useLocalized } from "../lib/localized";
@@ -152,7 +150,7 @@ function RunWizard() {
     instance_group: "gpu-p5", instance_type: "p5.48xlarge", nodes: 1, provider: "hyperpod", capacity: "on_demand",
     scale_up: true, scale_down_after: true, max_hours: 6, budget_usd: null, max_retries: 2,
   });
-  const [preview, setPreview] = useState<{ training_mode: TrainingMode; plan: Plan; estimate: RunEstimate; training_plan: TrainingPlan | null; agent_loop: Record<string, unknown> } | null>(null);
+  const [preview, setPreview] = useState<RunPreview | null>(null);
   const [planOk, setPlanOk] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -338,7 +336,7 @@ function RunWizard() {
                 <Select
                   value={typeof params.history_mode === "string" ? params.history_mode : ""}
                   onChange={(v: string) => setParams({ ...params, history_mode: v || undefined })}
-                  options={[{ value: "", label: t("params.history_mode_template") }, { value: "linear", label: "linear" }, { value: "tree", label: "tree" }]}
+                  options={[{ value: "", label: t("params.history_mode_template") }, ...(defaults.data?.history_modes ?? []).map((m) => ({ value: m, label: m }))]}
                 />
               </Field>
             </div>

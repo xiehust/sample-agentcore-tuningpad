@@ -696,12 +696,23 @@ export interface TrainerImageView {
   job: Job | null;
 }
 
+export interface RunPreview {
+  training_mode: TrainingMode;
+  plan: Plan;
+  params: Record<string, unknown>;
+  /** the run's rollout settings, stored as spec.agent_loop and rendered for every attempt */
+  agent_loop: Record<string, unknown>;
+  model: ModelCheck;
+  estimate: RunEstimate;
+  training_plan: TrainingPlan | null;
+}
+
 export const runApi = {
-  defaults: () => get<{ params: Record<string, unknown>; agent_loop: Record<string, number> }>("/api/runs/defaults"),
+  defaults: () => get<{ params: Record<string, unknown>; agent_loop: Record<string, number>; history_modes: string[] }>("/api/runs/defaults"),
   list: () => get<RunView[]>("/api/runs"),
   get: (id: string) => get<RunView>(`/api/runs/${id}`),
   preview: (body: CreateRunBody) =>
-    post<{ training_mode: TrainingMode; plan: Plan; params: Record<string, unknown>; agent_loop: Record<string, unknown>; model: ModelCheck; estimate: RunEstimate; training_plan: TrainingPlan | null }>("/api/runs/preview", body),
+    post<RunPreview>("/api/runs/preview", body),
   create: (body: CreateRunBody) => post<{ id: string; job_id: string }>("/api/runs", body),
   series: (id: string, keys: string[]) => get<Record<string, [number, number][]>>(`/api/runs/${id}/series?${q({ keys: keys.join(",") })}`),
   log: (id: string, offset: number) => get<LogChunk>(`/api/runs/${id}/log?offset=${offset}`),

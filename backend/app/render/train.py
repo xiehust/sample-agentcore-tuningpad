@@ -365,21 +365,30 @@ TEMPLATE_LOOP_KEYS = (
 
 
 def agent_loop_settings(template_loop: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    """The rollout settings a run gets: run params over the template's agent_loop over
-    TuningPad's fallbacks. Shown in the run preview and stored in the run spec."""
-    out: dict[str, Any] = {
-        k: params.get(k) or template_loop.get(k, default)
-        for k, default in AGENT_LOOP_DEFAULTS.items()
-    }
-    for k in TEMPLATE_LOOP_KEYS:
-        v = params.get(k) if params.get(k) is not None else template_loop.get(k)
-        if v is not None:
-            out[k] = v
+    """The rollout settings a run gets: for each key, a run param that is set, else the
+    template's agent_loop value, else TuningPad's fallback (if any). Shown in the run
+    preview and stored as the run's spec.agent_loop."""
+
+    def pick(k: str, fallback: Any = None) -> Any:
+        if params.get(k) is not None:
+            return params[k]
+        return template_loop.get(k, fallback)
+
+    out = {k: pick(k, default) for k, default in AGENT_LOOP_DEFAULTS.items()}
+    out |= {k: v for k in TEMPLATE_LOOP_KEYS if (v := pick(k)) is not None}
     return out
 
 
-def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> str:
-    """AgentCoreAgentLoop kwargs (cannot be set via Hydra CLI; verl reads this file)."""
+def agent_loop_yaml(
+    template_loop: dict[str, Any],
+    params: dict[str, Any],
+    settings: dict[str, Any] | None = None,
+) -> str:
+    """AgentCoreAgentLoop kwargs (cannot be set via Hydra CLI; verl reads this file).
+    `settings` is a run's stored spec.agent_loop: when given it wins, so every attempt runs
+    what the console showed at creation even if the template changed since."""
+    if settings is None:
+        settings = agent_loop_settings(template_loop, params)
     loop: dict[str, Any] = {
         "name": "agentcore_agent",
         "_target_": "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop",
@@ -388,7 +397,7 @@ def agent_loop_yaml(template_loop: dict[str, Any], params: dict[str, Any]) -> st
             "backend": ROLLOUT_SESSION_BACKEND,
             "agentcore_runtime_arn": "${oc.env:AGENT_RUNTIME_ARN}",
         },
-        **agent_loop_settings(template_loop, params),
+        **settings,
         "gateway_port": GATEWAY_PORT,
         # The port is reachable from the agents' VPC ENIs: only pre-registered sessions.
         # Added by the pinned fork (upstream PR awslabs/agentcore-rl-toolkit#250); the

@@ -1528,3 +1528,53 @@ def test_claude_code_preset_plans_fsdp_lora():
     )
     assert p.strategy == "fsdp_lora"
     assert p.world_size == 8
+
+
+def test_the_rayjob_runs_the_rollout_settings_the_run_stored(run_env):
+    """What the console shows (spec.agent_loop) is what every attempt renders, even if the
+    template changed since the run was created."""
+    stored = {
+        "max_tokens_per_turn": 2048,
+        "tps_limit": 4,
+        "max_rollout_time": 777,
+        "history_mode": "tree",
+    }
+    with session_scope() as s:
+        r = s.get(Run, "run-1")
+        r.spec = {**r.spec, "agent_loop": stored}
+    job = _wait(eng.get_engine().start("run.train", "run-1", {}))
+    assert job.status == "succeeded", job.error
+    cm = next(m for m in run_env["applied"] if m["kind"] == "ConfigMap")
+    loop = yaml.safe_load(cm["data"]["agentcore_agent.yaml"])[0]
+    assert {k: loop[k] for k in stored} == stored
+    assert loop["require_registered_sessions"] is True
+
+
+def test_tree_changes_the_rendered_agent_loop():
+    from app.templates_lib import get_template
+
+    loop = get_template("multi_harness")["agent_loop"]
+    linear = yaml.safe_load(rt.agent_loop_yaml(loop, rt.merge_params({})))[0]
+    tree = yaml.safe_load(rt.agent_loop_yaml(loop, rt.merge_params({"history_mode": "tree"})))[0]
+    assert (linear["history_mode"], tree["history_mode"]) == ("linear", "tree")
+
+
+def test_claude_code_preset_previews_with_a_cost_estimate(client, mode_request):
+    from app.templates_lib import get_template
+
+    preset = next(
+        p
+        for p in get_template("multi_harness")["presets"]
+        if p["id"] == "qwen35-4b-fsdp-lora-claude-code"
+    )
+    mode_request |= {
+        "params": preset["params"],
+        "prefer": preset["prefer"],
+        "tuning": preset["tuning"],
+    }
+    mode_request["compute"] |= {"instance_type": preset["instance_type"], "nodes": preset["nodes"]}
+    d = client.post("/api/runs/preview", json=mode_request)
+    assert d.status_code == 200, d.text
+    est = d.json()["estimate"]
+    assert est["hourly_usd"] > 0 and est["max_cost_usd"] > 0
+    assert d.json()["plan"]["strategy"] == "fsdp_lora"

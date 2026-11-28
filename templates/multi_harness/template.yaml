@@ -1,8 +1,8 @@
 id: multi_harness
 name: {en: "Multi-harness (SmolDataEnvs data analysis)", zh-CN: "多 Harness（SmolDataEnvs 数据分析）"}
 description:
-  en: "Trains one model inside unmodified agent harnesses (Claude Code) on SmolDataEnvs data-analysis tasks. Each Task's own verifier grades the answer after the harness exits; correct answers earn a small bonus for fewer tool calls. Claude Code is not open source: it is installed from npm under Anthropic's terms, which you need to review yourself."
-  zh-CN: "在不修改的 agent harness（Claude Code）里，用 SmolDataEnvs 数据分析任务训练同一个模型。Harness 退出后由 Task 自带的 Verifier 给答案打分；答对时工具调用越少，加分越多。Claude Code 不是开源软件，从 npm 安装并受 Anthropic 条款约束，请自行确认。"
+  en: "Trains one model inside unmodified agent harnesses (Claude Code) on SmolDataEnvs data-analysis tasks. Each Task's own verifier grades the answer after the harness exits; correct answers earn a small bonus for fewer tool calls. Rollouts use the gateway's linear history mode by default: history a harness rewrote (repaired tool calls, re-spacing) is replaced by the model's original output; a run can choose tree to train on exactly what the harness sent. Claude Code is not open source: it is installed from npm under Anthropic's terms, which you need to review yourself."
+  zh-CN: "在不修改的 agent harness（Claude Code）里，用 SmolDataEnvs 数据分析任务训练同一个模型。Harness 退出后由 Task 自带的 Verifier 给答案打分；答对时工具调用越少，加分越多。rollout 默认使用 gateway 的 linear history 模式：harness 改写过的历史（修复的工具调用、空白调整）会换回模型的原始输出；run 可以改选 tree，按 harness 实际发送的内容训练。Claude Code 不是开源软件，从 npm 安装并受 Anthropic 条款约束，请自行确认。"
 contract: verl-v2
 verified: false
 params:
@@ -49,6 +49,8 @@ agent_loop:
   # harnesses send their own temperature/top_p: sample with the trainer's instead
   override_client_sampling: true
 smoke_payloads: []             # filled from the generated dataset (first two val rows)
+# The toolkit caps a session's whole context at max_response_length (prompt overflow moves
+# into the response region), so 65536 is the real per-rollout context budget here.
 presets:
   - id: qwen35-4b-fsdp-lora-claude-code
     label: {en: "Qwen3.5-4B · 8×H100 · FSDP LoRA · Claude Code (not verified)", zh-CN: "Qwen3.5-4B · 8×H100 · FSDP LoRA · Claude Code（未验证）"}
@@ -57,4 +59,4 @@ presets:
     nodes: 1
     prefer: fsdp
     tuning: lora
-    params: {train_batch_size: 16, rollout_n: 8, lr: 2.0e-5, total_epochs: 1, max_model_len: 65536, max_prompt_length: 32768, max_response_length: 32768, kl_loss_coef: 0.001, save_freq: 10, test_freq: 10, val_n: 1, gpu_memory_utilization: 0.5, enable_thinking: false}
+    params: {train_batch_size: 16, rollout_n: 8, lr: 2.0e-5, total_epochs: 1, max_model_len: 65536, max_prompt_length: 32768, max_response_length: 65536, kl_loss_coef: 0.001, save_freq: 10, test_freq: 10, val_n: 1, gpu_memory_utilization: 0.5, enable_thinking: false}

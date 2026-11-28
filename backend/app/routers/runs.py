@@ -17,8 +17,8 @@ from ..planner import plan as make_plan
 from ..render.train import (
     AGENT_LOOP_DEFAULTS,
     DEFAULT_PARAMS,
+    HISTORY_MODES,
     TrainingMode,
-    agent_loop_settings,
     merge_params,
 )
 from ..services import agents as agents_svc
@@ -26,7 +26,6 @@ from ..services import hyperpod as hp
 from ..services import pools
 from ..services import project as proj
 from ..services import runs as svc
-from ..templates_lib import get_template
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 ACTIVE = {"queued", "preparing", "waiting_capacity", "running", "retrying"}
@@ -128,7 +127,7 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         {"training_mode": body.training_mode, "plan": p, "params": body.params},
         body.compute.model_dump(),
     )
-    template_loop = (get_template(template_id).get("agent_loop") or {}) if template_id else {}
+    agent_loop = svc.rollout_settings(template_id, params)
     plan_info = None
     if body.compute.provider == "ec2" and body.compute.capacity == "training_plan":
         raise AppError("nodegroup.bad_capacity", "EC2 node groups use On-Demand or Spot capacity")
@@ -152,14 +151,18 @@ def _validate(body: CreateRun) -> dict[str, Any]:
         "region": region,
         "plan": p,
         "params": params,
-        "agent_loop": agent_loop_settings(template_loop, params),
+        "agent_loop": agent_loop,
         "model": m.to_dict(),
     }
 
 
 @router.get("/defaults")
 def defaults():
-    return {"params": DEFAULT_PARAMS, "agent_loop": AGENT_LOOP_DEFAULTS}
+    return {
+        "params": DEFAULT_PARAMS,
+        "agent_loop": AGENT_LOOP_DEFAULTS,
+        "history_modes": list(HISTORY_MODES),
+    }
 
 
 @router.post("/preview")

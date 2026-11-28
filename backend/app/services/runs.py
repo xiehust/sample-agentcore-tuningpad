@@ -12,6 +12,7 @@ from ..catalog import instances
 from ..core import aws
 from ..core.errors import AppError
 from ..render import train as rt
+from ..templates_lib import get_template
 from . import kube, pools
 
 RAYJOB_API = "ray.io/v1"
@@ -52,6 +53,12 @@ def validate_training_contract(
                 "colocate_async requires finite max_hours ≤ 720 yielding at least one second",
             )
     return mode, params, int(hours * 3600) if hours else None
+
+
+def rollout_settings(template_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+    """A new run's rollout settings (its spec.agent_loop) for the Agent's template."""
+    template_loop = (get_template(template_id).get("agent_loop") or {}) if template_id else {}
+    return rt.agent_loop_settings(template_loop, params)
 
 
 def render(
@@ -104,7 +111,9 @@ def render(
         run["id"],
         {
             "train.sh": script,
-            "agentcore_agent.yaml": rt.agent_loop_yaml(template_loop, params),
+            "agentcore_agent.yaml": rt.agent_loop_yaml(
+                template_loop, params, run["spec"].get("agent_loop")
+            ),
             "hydra.json": json.dumps(hydra, indent=1),
         },
     )
